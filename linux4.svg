@@ -22,7 +22,7 @@
         Object.defineProperty(document, "cookie", { get: () => c, set: v => { c = v; } });
       }
     
-      // Enable Ctrl+V paste by feeding 1 character per input event for mobile.js
+           // Enable Ctrl+V paste by dispatching keypress events to JSLinux's document listener
       window.addEventListener("keydown", async (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
           e.preventDefault();
@@ -31,28 +31,34 @@
             const text = await navigator.clipboard.readText();
             if (!text) return;
             const clean = text.replace(/\r\n/g, "\n");
-            const target = document.querySelector("textarea, input[type='text']") || document.activeElement;
-            if (!target) return;
-
             let idx = 0;
+
             const typer = setInterval(() => {
               if (idx >= clean.length) {
                 clearInterval(typer);
                 return;
               }
               const ch = clean[idx++];
-              if (ch === "\n") {
-                target.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, which: 13, bubbles: true }));
-              } else {
-                target.value = (target.value || "") + ch;
-                target.dispatchEvent(new Event("input", { bubbles: true }));
-              }
-            }, 15);
+              const code = ch === "\n" ? 13 : ch.charCodeAt(0);
+              const evt = new KeyboardEvent("keypress", {
+                key: ch === "\n" ? "Enter" : ch,
+                charCode: code,
+                keyCode: code,
+                which: code,
+                bubbles: true,
+                cancelable: true
+              });
+              Object.defineProperty(evt, "charCode", { value: code });
+              Object.defineProperty(evt, "keyCode", { value: code });
+              Object.defineProperty(evt, "which", { value: code });
+              document.dispatchEvent(evt);
+            }, 25);
           } catch (err) {
             console.warn("Clipboard paste blocked:", err);
           }
         }
       }, true);
+
 
 
 
