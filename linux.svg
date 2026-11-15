@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject width="100%" height="100%">
+    <html xmlns="http://w3.org">
+      <head>
+        <base href="https://jsdelivr.net" />
+      </head>
+      <body style="margin:0;background:#000;color:#0f0;font-family:monospace;">
+        <div id="status" style="padding:16px;">Booting JSLinux Mobile...</div>
+        <script>//<![CDATA[
+          const BASE = "https://jsdelivr.net";
+          fetch(BASE + "index.html")
+            .then(res => {
+              if (!res.ok) throw new Error("Failed to fetch index.html");
+              return res.text();
+            })
+            .then(html => {
+              const doc = new DOMParser().parseFromString(html, "text/html");
+              
+              // Copy stylesheets and head elements safely into XML DOM
+              Array.from(doc.head.children).forEach(el => {
+                if (el.tagName !== "SCRIPT") {
+                  document.head.appendChild(document.importNode(el, true));
+                }
+              });
+
+              // Replace body content safely using DOM importNode (avoids XML syntax errors)
+              document.body.innerHTML = "";
+              Array.from(doc.body.childNodes).forEach(node => {
+                if (node.nodeName !== "SCRIPT") {
+                  document.body.appendChild(document.importNode(node, true));
+                }
+              });
+
+              // Execute all scripts from head and body in exact sequence
+              const scripts = Array.from(doc.querySelectorAll("script"));
+              (function runNext(i) {
+                if (i >= scripts.length) {
+                  if (typeof window.onload === "function") window.onload();
+                  return;
+                }
+                const oldScript = scripts[i];
+                const newScript = document.createElementNS("http://w3.org", "script");
+                if (oldScript.src) {
+                  newScript.src = oldScript.getAttribute("src");
+                  newScript.onload = () => runNext(i + 1);
+                  newScript.onerror = () => runNext(i + 1);
+                } else {
+                  newScript.textContent = oldScript.textContent;
+                  runNext(i + 1);
+                }
+                document.body.appendChild(newScript);
+              })(0);
+            })
+            .catch(err => {
+              document.getElementById("status").textContent = "Error: " + err.message;
+            });
+        //]]></script>
+      </body>
+    </html>
+  </foreignObject>
+</svg>
