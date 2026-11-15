@@ -22,7 +22,9 @@
         Object.defineProperty(document, "cookie", { get: () => c, set: v => { c = v; } });
       }
     
-      // Enable Ctrl+V paste into JSLinux terminal (paced so serial buffer never drops chars)
+      // Enable Ctrl+V paste into JSLinux terminal using a safe FIFO queue
+      let pasteQueue = [];
+      let pasteTimer = null;
       window.addEventListener("keydown", async (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
           e.preventDefault();
@@ -30,22 +32,30 @@
           try {
             const text = await navigator.clipboard.readText();
             if (!text) return;
-            const clean = text.replace(/\r\n/g, "\n");
-            for (let i = 0; i < clean.length; i++) {
-              setTimeout(() => {
-                const ch = clean[i] === "\n" ? "\r" : clean[i];
+            const chars = Array.from(text.replace(/\r\n/g, "\n")).map(c => c === "\n" ? "\r" : c);
+            pasteQueue.push(...chars);
+            if (!pasteTimer) {
+              pasteTimer = setInterval(() => {
+                if (pasteQueue.length === 0) {
+                  clearInterval(pasteTimer);
+                  pasteTimer = null;
+                  return;
+                }
+                const ch = pasteQueue.shift();
                 if (window.term && typeof window.term.send_chars === "function") {
                   window.term.send_chars(ch);
                 } else if (typeof pc !== "undefined" && pc.serial) {
                   pc.serial.send_char(ch.charCodeAt(0));
                 }
-              }, i * 5);
+              }, 12);
             }
           } catch (err) {
             console.warn("Clipboard paste blocked:", err);
           }
         }
       }, true);
+
+    
     <\/script>`;
 
     fetch(BASE + "index.html")
