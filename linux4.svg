@@ -22,9 +22,7 @@
         Object.defineProperty(document, "cookie", { get: () => c, set: v => { c = v; } });
       }
     
-      // Enable Ctrl+V paste into JSLinux terminal using a safe FIFO queue
-      let pasteQueue = [];
-      let pasteTimer = null;
+            // Enable Ctrl+V paste into JSLinux terminal via native paste or serial buffer
       window.addEventListener("keydown", async (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
           e.preventDefault();
@@ -32,28 +30,31 @@
           try {
             const text = await navigator.clipboard.readText();
             if (!text) return;
-            const chars = Array.from(text.replace(/\r\n/g, "\n")).map(c => c === "\n" ? "\r" : c);
-            pasteQueue.push(...chars);
-            if (!pasteTimer) {
-              pasteTimer = setInterval(() => {
-                if (pasteQueue.length === 0) {
-                  clearInterval(pasteTimer);
-                  pasteTimer = null;
-                  return;
+            const clean = text.replace(/\r\n/g, "\n").replace(/\n/g, "\r");
+            
+            if (window.term && typeof window.term.paste === "function") {
+              window.term.paste(clean);
+            } else if (typeof pc !== "undefined" && pc.serial) {
+              if (Array.isArray(pc.serial.receive_fifo)) {
+                for (let i = 0; i < clean.length; i++) {
+                  pc.serial.receive_fifo.push(clean.charCodeAt(i));
                 }
-                const ch = pasteQueue.shift();
-                if (window.term && typeof window.term.send_chars === "function") {
-                  window.term.send_chars(ch);
-                } else if (typeof pc !== "undefined" && pc.serial) {
-                  pc.serial.send_char(ch.charCodeAt(0));
-                }
-              }, 12);
+                if (typeof pc.serial.update_irq === "function") pc.serial.update_irq();
+              } else {
+                // Fallback: 30ms interval with serial IRQ trigger
+                let idx = 0;
+                const t = setInterval(() => {
+                  if (idx >= clean.length) return clearInterval(t);
+                  pc.serial.send_char(clean.charCodeAt(idx++));
+                }, 30);
+              }
             }
           } catch (err) {
             console.warn("Clipboard paste blocked:", err);
           }
         }
       }, true);
+
 
     
     <\/script>`;
