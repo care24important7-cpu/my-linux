@@ -6,17 +6,17 @@
     const BASE = "https:/" + "/cdn.jsdelivr.net/gh/s-macke/jor1k@master/";
     const frame = document.getElementById("linux_frame");
 
-    const workerShim = `<base href="${BASE}" />
+    const workerShim = `<base href="${BASE}demos/" />
     <script>
       const OrigWorker = window.Worker;
       window.Worker = function(url, opts) {
-        const fullUrl = new URL(url, "${BASE}").href;
+        const fullUrl = new URL(url, "${BASE}demos/").href;
         const blob = new Blob(['importScripts("' + fullUrl + '");'], { type: "application/javascript" });
         return new OrigWorker(URL.createObjectURL(blob), opts);
       };
     <\/script>`;
 
-    fetch(BASE + "index.html")
+    fetch(BASE + "demos/main.html")
       .then(res => {
         if (!res.ok) throw new Error("HTTP " + res.status);
         return res.text();
