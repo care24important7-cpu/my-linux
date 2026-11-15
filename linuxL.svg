@@ -6,7 +6,6 @@
     const BASE = "https:/" + "/cdn.jsdelivr.net/gh/s-macke/jor1k@master/";
     const frame = document.getElementById("linux_frame");
 
-    // Shim Web Workers & relative paths so jor1k's CPU worker runs cleanly inside an SVG iframe
     const workerShim = `<base href="${BASE}" />
     <script>
       const OrigWorker = window.Worker;
@@ -23,9 +22,9 @@
         return res.text();
       })
       .then(html => {
-        // Rewrite root-relative paths (demos/, js/) so they resolve cleanly via jsDelivr
         let fixed = html.replace(/<head[^>]*>/i, match => match + workerShim);
-        fixed = fixed.replace(/(src|href)=["']\/([^"']+)["']/gi, '$1="' + BASE + '$2"');
+        fixed = fixed.split('src="/').join('src="' + BASE);
+        fixed = fixed.split('href="/').join('href="' + BASE);
 
         const win = frame.contentWindow;
         const doc = frame.contentDocument || win.document;
@@ -34,10 +33,7 @@
         doc.close();
       })
       .catch(err => {
-        const doc = frame.contentDocument || frame.contentWindow.document;
-        doc.open();
-        doc.write('<body style="background:#000;color:#0f0;font-family:monospace;padding:16px;">Error: ' + err.message + '</body>');
-        doc.close();
+        console.error("jor1k loader error:", err);
       });
   ]]></script>
 </svg>
