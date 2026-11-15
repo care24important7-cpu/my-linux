@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="daw_frame" allow="microphone; autoplay; clipboard-read; clipboard-write" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const BASE = "https:/" + "/cdn.jsdelivr.net/gh/pkalogiros/AudioMass@production/src/";
+    const frame = document.getElementById("daw_frame");
+
+    const storageShim = `<base href="${BASE}" /><script>
+      (function() {
+        function makeMemStorage() {
+          const mem = {};
+          return {
+            getItem: k => Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null,
+            setItem: (k, v) => { mem[k] = String(v); },
+            removeItem: k => { delete mem[k]; },
+            clear: () => { for (const k in mem) delete mem[k]; }
+          };
+        }
+        try { window.localStorage.getItem("t"); } catch (e) {
+          Object.defineProperty(window, "localStorage", { value: makeMemStorage() });
+        }
+        try { window.sessionStorage.getItem("t"); } catch (e) {
+          Object.defineProperty(window, "sessionStorage", { value: makeMemStorage() });
+        }
+        try { document.cookie; } catch (e) {
+          let c = "";
+          Object.defineProperty(document, "cookie", { get: () => c, set: v => { c = v; } });
+        }
+        try { window.indexedDB; } catch (e) {
+          Object.defineProperty(window, "indexedDB", { value: null });
+        }
+      })();
+    <\/script>`;
+
+    fetch(BASE + "index.html")
+      .then(res => res.text())
+      .then(html => {
+        const injected = html.replace(/<head[^>]*>/i, match => match + storageShim);
+        const win = frame.contentWindow;
+        const doc = frame.contentDocument || win.document;
+        doc.open();
+        doc.write(injected);
+        doc.close();
+      });
+  ]]></script>
+</svg>
