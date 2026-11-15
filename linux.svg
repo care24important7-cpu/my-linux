@@ -5,10 +5,10 @@
     </div>
   </foreignObject>
   <script type="application/ecmascript"><![CDATA[
-    const BASE = "https://jsdelivr.net";
-    const XHTML = "http://w3.org";
+    const BASE = "https:/" + "/cdn.jsdelivr.net/gh/jaromaz/jslinux-mobile@master/";
+    const XHTML = "http:/" + "/www.w3.org/1999/xhtml";
+    const SVGNS = "http:/" + "/www.w3.org/2000/svg";
 
-    // Ensure relative XHRs and scripts resolve to Jaromaz's repo
     const baseEl = document.createElementNS(XHTML, "base");
     baseEl.setAttribute("href", BASE);
     document.documentElement.insertBefore(baseEl, document.documentElement.firstChild);
@@ -23,19 +23,16 @@
         const app = document.getElementById("app");
         app.innerHTML = "";
 
-        // Import CSS styles
         doc.querySelectorAll("link[rel='stylesheet'], style").forEach(el => {
           app.appendChild(document.importNode(el, true));
         });
 
-        // Import body elements (excluding scripts)
         Array.from(doc.body.childNodes).forEach(node => {
           if (node.nodeName !== "SCRIPT") {
             app.appendChild(document.importNode(node, true));
           }
         });
 
-        // Load and run all scripts sequentially
         const scripts = Array.from(doc.querySelectorAll("script"));
         (function runNext(i) {
           if (i >= scripts.length) {
@@ -43,7 +40,7 @@
             return;
           }
           const oldScript = scripts[i];
-          const newScript = document.createElementNS("http://w3.org", "script");
+          const newScript = document.createElementNS(SVGNS, "script");
           if (oldScript.src) {
             newScript.setAttribute("href", BASE + oldScript.getAttribute("src"));
             newScript.onload = () => runNext(i + 1);
