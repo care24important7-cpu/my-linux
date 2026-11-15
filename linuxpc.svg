@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const BASE = "https:/" + "/cdn.jsdelivr.net/gh/jaromaz/jslinux-mobile@master/";
+    const frame = document.getElementById("linux_frame");
+
+    const storageShim = `<base href="${BASE}" />
+    <style>
+      body, html { margin: 0 !important; padding: 0 !important; background: #000 !important; overflow: hidden !important; }
+      #options, .mobile-controls { display: none !important; }
+    </style>
+    <script>
+      try { window.localStorage.getItem("t"); } catch (e) {
+        const mem = {};
+        Object.defineProperty(window, "localStorage", { value: {
+          getItem: k => mem[k] || null,
+          setItem: (k, v) => { mem[k] = String(v); },
+          removeItem: k => { delete mem[k]; },
+          clear: () => { for (const k in mem) delete mem[k]; }
+        }});
+      }
+      try { document.cookie; } catch (e) {
+        let c = "";
+        Object.defineProperty(document, "cookie", { get: () => c, set: v => { c = v; } });
+      }
+    <\/script>`;
+
+    fetch(BASE + "index.html")
+      .then(res => res.text())
+      .then(html => {
+        const injected = html.replace(/<head[^>]*>/i, match => match + storageShim);
+        const win = frame.contentWindow;
+        const doc = frame.contentDocument || win.document;
+        doc.open();
+        doc.write(injected);
+        doc.close();
+
+        // Auto-click the "OK" button on the mobile welcome modal for instant PC boot
+        const autoOk = setInterval(() => {
+          const links = doc.querySelectorAll("a, button");
+          for (const el of links) {
+            if (el.textContent && el.textContent.trim() === "OK") {
+              el.click();
+              win.focus();
+              clearInterval(autoOk);
+              break;
+            }
+          }
+        }, 200);
+        setTimeout(() => clearInterval(autoOk), 10000);
+
+        // Fast 10ms Ctrl+V paste handler
+        async function onFrameKeyDown(e) {
+          if ((e.ctrlKey || e.metaKey) && e.key && e.key.toLowerCase() === "v") {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+
+            let text = "";
+            try {
+              text = await navigator.clipboard.readText();
+            } catch (err) {
+              text = win.prompt("Press Ctrl+V here and click OK:") || "";
+            }
+            if (!text) return;
+
+            const clean = text.split("\r\n").join("\n").split("\n").join("\r");
+            let idx = 0;
+
+            const typer = setInterval(() => {
+              if (idx >= clean.length) {
+                clearInterval(typer);
+                return;
+              }
+              const code = clean.charCodeAt(idx++);
+              if (win.pc && win.pc.serial) {
+                win.pc.serial.send_char(code);
+              } else {
+                clearInterval(typer);
+              }
+            }, 10);
+          }
+        }
+
+        win.addEventListener("keydown", onFrameKeyDown, true);
+        doc.addEventListener("keydown", onFrameKeyDown, true);
+      });
+  ]]></script>
+</svg>
