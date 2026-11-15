@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const BASE = "https:/" + "/cdn.jsdelivr.net/gh/s-macke/jor1k@master/";
+    const SYS_BASE = "https:/" + "/cdn.jsdelivr.net/gh/s-macke/openrisc-sys@4c42195/";
+    const frame = document.getElementById("linux_frame");
+
+    const workerShim = `<base href="${BASE}demos/" />
+    <script>
+      const OrigWorker = window.Worker;
+      window.Worker = function(url, opts) {
+        const fullUrl = new URL(url, "${BASE}demos/").href;
+        const lines = [
+          'const SYS = "${SYS_BASE}";',
+          'const DEMOS = "${BASE}demos/";',
+          'function fixUrl(u) {',
+          '  if (typeof u !== "string" || u.startsWith("http") || u.startsWith("blob:")) return u;',
+          '  let idx = u.indexOf("openrisc-sys/");',
+          '  if (idx !== -1) return SYS + u.substring(idx + 13);',
+          '  idx = u.indexOf("jor1k-sys/");',
+          '  if (idx !== -1) return SYS + u.substring(idx + 10);',
+          '  return new URL(u, DEMOS).href;',
+          '}',
+          'const OrigFetch = self.fetch;',
+          'self.fetch = function(input, init) {',
+          '  if (typeof input === "string") input = fixUrl(input);',
+          '  return OrigFetch.call(this, input, init);',
+          '};',
+          'const OrigXHR = self.XMLHttpRequest;',
+          'self.XMLHttpRequest = function() {',
+          '  const xhr = new OrigXHR();',
+          '  const origOpen = xhr.open;',
+          '  xhr.open = function(method, reqUrl) {',
+          '    reqUrl = fixUrl(reqUrl);',
+          '    const args = Array.prototype.slice.call(arguments, 2);',
+          '    return origOpen.apply(this, [method, reqUrl].concat(args));',
+          '  };',
+          '  return xhr;',
+          '};',
+          'importScripts("' + fullUrl + '");'
+        ];
+        const blob = new Blob([lines.join(" ")], { type: "application/javascript" });
+        return new OrigWorker(URL.createObjectURL(blob), opts);
+      };
+    <\/script>`;
+
+    fetch(BASE + "demos/main.html")
+      .then(res => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.text();
+      })
+      .then(html => {
+        let fixed = html.replace(/<head[^>]*>/i, match => match + workerShim);
+        fixed = fixed.split('src="/').join('src="' + BASE);
+        fixed = fixed.split('href="/').join('href="' + BASE);
+
+        const win = frame.contentWindow;
+        const doc = frame.contentDocument || win.document;
+        doc.open();
+        doc.write(fixed);
+        doc.close();
+      })
+      .catch(err => {
+        console.error("jor1k loader error:", err);
+      });
+  ]]></script>
+</svg>
