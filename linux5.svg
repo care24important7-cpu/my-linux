@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
   <foreignObject x="0" y="0" width="100%" height="100%">
     <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
   </foreignObject>
@@ -6,9 +6,9 @@
     const BASE = "https:/" + "/cdn.jsdelivr.net/gh/jaromaz/jslinux-mobile@master/";
     const frame = document.getElementById("linux_frame");
 
-    const shim = `<base href="${BASE}" /><script>
-      console.log("[PASTE DEBUG] Shim loaded inside iframe!");
+    console.log("[PASTE DEBUG] Outer SVG script started!");
 
+    const storageShim = `<base href="${BASE}" /><script>
       try { window.localStorage.getItem("t"); } catch (e) {
         const mem = {};
         Object.defineProperty(window, "localStorage", { value: {
@@ -22,53 +22,6 @@
         let c = "";
         Object.defineProperty(document, "cookie", { get: () => c, set: v => { c = v; } });
       }
-
-      async function handlePaste(e) {
-        if ((e.ctrlKey || e.metaKey) && e.key && e.key.toLowerCase() === "v") {
-          console.log("[PASTE DEBUG] Ctrl+V detected! Target:", e.target && e.target.tagName);
-          e.preventDefault();
-          e.stopImmediatePropagation();
-
-          let text = "";
-          try {
-            text = await navigator.clipboard.readText();
-            console.log("[PASTE DEBUG] Read from navigator.clipboard:", JSON.stringify(text));
-          } catch (err) {
-            console.warn("[PASTE DEBUG] navigator.clipboard failed:", err.message);
-            text = window.prompt("Press Ctrl+V here and click OK to paste into Linux:") || "";
-            console.log("[PASTE DEBUG] Read from prompt:", JSON.stringify(text));
-          }
-
-          if (!text) {
-            console.warn("[PASTE DEBUG] No text to paste (empty).");
-            return;
-          }
-
-          console.log("[PASTE DEBUG] Checking pc:", typeof pc, typeof pc !== "undefined" ? pc.serial : "no pc");
-          console.log("[PASTE DEBUG] Checking window.term:", typeof window.term);
-
-          const clean = text.split("\\r\\n").join("\\n").split("\\n").join("\\r");
-          let idx = 0;
-
-          const typer = setInterval(() => {
-            if (idx >= clean.length) {
-              console.log("[PASTE DEBUG] Finished sending all", clean.length, "chars.");
-              clearInterval(typer);
-              return;
-            }
-            const code = clean.charCodeAt(idx++);
-            if (typeof pc !== "undefined" && pc.serial && typeof pc.serial.send_char === "function") {
-              pc.serial.send_char(code);
-            } else {
-              console.error("[PASTE DEBUG] pc.serial.send_char is NOT available!");
-              clearInterval(typer);
-            }
-          }, 40);
-        }
-      }
-
-      window.addEventListener("keydown", handlePaste, true);
-      document.addEventListener("keydown", handlePaste, true);
     <\/script>`;
 
     fetch(BASE + "index.html")
@@ -77,17 +30,60 @@
         return res.text();
       })
       .then(html => {
-        const injected = html.replace(/<head[^>]*>/i, match => match + shim);
-        const doc = frame.contentDocument || frame.contentWindow.document;
+        const injected = html.replace(/<head[^>]*>/i, match => match + storageShim);
+        const win = frame.contentWindow;
+        const doc = frame.contentDocument || win.document;
         doc.open();
         doc.write(injected);
         doc.close();
+
+        // Attach Ctrl+V paste handler directly to the iframe's window & document
+        async function onFrameKeyDown(e) {
+          if ((e.ctrlKey || e.metaKey) && e.key && e.key.toLowerCase() === "v") {
+            console.log("[PASTE DEBUG] Ctrl+V caught! pc =", typeof win.pc, "term =", typeof win.term);
+            e.preventDefault();
+            e.stopImmediatePropagation();
+
+            let text = "";
+            try {
+              text = await navigator.clipboard.readText();
+              console.log("[PASTE DEBUG] Clipboard API text:", JSON.stringify(text));
+            } catch (err) {
+              console.warn("[PASTE DEBUG] Clipboard API blocked:", err.message);
+              text = win.prompt("Press Ctrl+V here and click OK to paste into Linux:") || "";
+              console.log("[PASTE DEBUG] Prompt text:", JSON.stringify(text));
+            }
+
+            if (!text) return;
+
+            const clean = text.split("\r\n").join("\n").split("\n").join("\r");
+            let idx = 0;
+
+            const typer = setInterval(() => {
+              if (idx >= clean.length) {
+                console.log("[PASTE DEBUG] Done typing", clean.length, "chars.");
+                clearInterval(typer);
+                return;
+              }
+              const code = clean.charCodeAt(idx++);
+              if (win.pc && win.pc.serial && typeof win.pc.serial.send_char === "function") {
+                win.pc.serial.send_char(code);
+              } else if (win.term && typeof win.term.send_chars === "function") {
+                win.term.send_chars(String.fromCharCode(code));
+              } else {
+                console.error("[PASTE DEBUG] No serial or term found! Keys on win:", Object.keys(win).filter(k => k.includes("pc") || k.includes("term") || k.includes("serial")));
+                clearInterval(typer);
+              }
+            }, 40);
+          }
+        }
+
+        win.addEventListener("keydown", onFrameKeyDown, true);
+        doc.addEventListener("keydown", onFrameKeyDown, true);
+        console.log("[PASTE DEBUG] Keydown listeners attached to iframe!");
       })
       .catch(err => {
-        const doc = frame.contentDocument || frame.contentWindow.document;
-        doc.open();
-        doc.write('<body style="background:#000;color:#0f0;font-family:monospace;padding:16px;">Error: ' + err.message + '</body>');
-        doc.close();
+        console.error("[PASTE DEBUG] Fetch error:", err);
       });
   ]]></script>
 </svg>
