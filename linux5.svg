@@ -7,6 +7,8 @@
     const frame = document.getElementById("linux_frame");
 
     const shim = `<base href="${BASE}" /><script>
+      console.log("[PASTE DEBUG] Shim loaded inside iframe!");
+
       try { window.localStorage.getItem("t"); } catch (e) {
         const mem = {};
         Object.defineProperty(window, "localStorage", { value: {
@@ -21,35 +23,52 @@
         Object.defineProperty(document, "cookie", { get: () => c, set: v => { c = v; } });
       }
 
-      // Reliable Ctrl+V paste directly into pc.serial.send_char() with 40ms pacing
-      window.addEventListener("keydown", async (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+      async function handlePaste(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key && e.key.toLowerCase() === "v") {
+          console.log("[PASTE DEBUG] Ctrl+V detected! Target:", e.target && e.target.tagName);
           e.preventDefault();
           e.stopImmediatePropagation();
 
           let text = "";
           try {
             text = await navigator.clipboard.readText();
+            console.log("[PASTE DEBUG] Read from navigator.clipboard:", JSON.stringify(text));
           } catch (err) {
+            console.warn("[PASTE DEBUG] navigator.clipboard failed:", err.message);
             text = window.prompt("Press Ctrl+V here and click OK to paste into Linux:") || "";
+            console.log("[PASTE DEBUG] Read from prompt:", JSON.stringify(text));
           }
-          if (!text) return;
+
+          if (!text) {
+            console.warn("[PASTE DEBUG] No text to paste (empty).");
+            return;
+          }
+
+          console.log("[PASTE DEBUG] Checking pc:", typeof pc, typeof pc !== "undefined" ? pc.serial : "no pc");
+          console.log("[PASTE DEBUG] Checking window.term:", typeof window.term);
 
           const clean = text.split("\\r\\n").join("\\n").split("\\n").join("\\r");
           let idx = 0;
 
           const typer = setInterval(() => {
             if (idx >= clean.length) {
+              console.log("[PASTE DEBUG] Finished sending all", clean.length, "chars.");
               clearInterval(typer);
               return;
             }
             const code = clean.charCodeAt(idx++);
             if (typeof pc !== "undefined" && pc.serial && typeof pc.serial.send_char === "function") {
               pc.serial.send_char(code);
+            } else {
+              console.error("[PASTE DEBUG] pc.serial.send_char is NOT available!");
+              clearInterval(typer);
             }
           }, 40);
         }
-      }, true);
+      }
+
+      window.addEventListener("keydown", handlePaste, true);
+      document.addEventListener("keydown", handlePaste, true);
     <\/script>`;
 
     fetch(BASE + "index.html")
