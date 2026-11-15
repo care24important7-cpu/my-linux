@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const BASE = "https:/" + "/cdn.jsdelivr.net/gh/jaromaz/jslinux-mobile@master/";
+    const frame = document.getElementById("linux_frame");
+
+    fetch(BASE + "loader.html")
+      .then(res => res.ok ? res.text() : fetch(BASE + "index.html").then(r => r.text()))
+      .then(html => {
+        // Inject <base> tag so all relative scripts, CSS, and .bin files load from Jaromaz's repo
+        const injected = html.replace(/<head[^>]*>/i, match => match + '<base href="' + BASE + '" />');
+        const doc = frame.contentDocument || frame.contentWindow.document;
+        doc.open();
+        doc.write(injected);
+        doc.close();
+      })
+      .catch(err => {
+        const doc = frame.contentDocument || frame.contentWindow.document;
+        doc.open();
+        doc.write('<body style="background:#000;color:#0f0;font-family:monospace;padding:16px;">Error: ' + err.message + '</body>');
+        doc.close();
+      });
+  ]]></script>
+</svg>
