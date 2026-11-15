@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const BASE = "https:/" + "/cdn.jsdelivr.net/gh/jaromaz/jslinux-mobile@master/";
+    const frame = document.getElementById("linux_frame");
+
+    const shim = `<base href="${BASE}" /><script>
+      try { window.localStorage.getItem("t"); } catch (e) {
+        const mem = {};
+        Object.defineProperty(window, "localStorage", { value: {
+          getItem: k => mem[k] || null,
+          setItem: (k, v) => { mem[k] = String(v); },
+          removeItem: k => { delete mem[k]; },
+          clear: () => { for (const k in mem) delete mem[k]; }
+        }});
+      }
+      try { document.cookie; } catch (e) {
+        let c = "";
+        Object.defineProperty(document, "cookie", { get: () => c, set: v => { c = v; } });
+      }
+
+      // Reliable Ctrl+V paste without regexes (uses prompt fallback + onkeypress)
+      window.addEventListener("keydown", async (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+
+          let text = "";
+          try {
+            text = await navigator.clipboard.readText();
+          } catch (err) {
+            text = window.prompt("Press Ctrl+V here and click OK to paste into Linux:") || "";
+          }
+          if (!text) return;
+
+          const clean = text.split("\\r\\n").join("\\n");
+          let idx = 0;
+
+          const typer = setInterval(() => {
+            if (idx >= clean.length) {
+              clearInterval(typer);
+              return;
+            }
+            const ch = clean[idx++];
+            const isEnter = ch === "\\n";
+            const code = isEnter ? 13 : ch.charCodeAt(0);
+            const fakeEvt = {
+              type: isEnter ? "keydown" : "keypress",
+              key: isEnter ? "Enter" : ch,
+              charCode: isEnter ? 0 : code,
+              keyCode: code,
+              which: code,
+              ctrlKey: false,
+              altKey: false,
+              metaKey: false,
+              shiftKey: false,
+              preventDefault: () => {},
+              stopPropagation: () => {}
+            };
+
+            if (isEnter && typeof document.onkeydown === "function") {
+              document.onkeydown(fakeEvt);
+            } else if (typeof document.onkeypress === "function") {
+              document.onkeypress(fakeEvt);
+            } else if (typeof window.onkeypress === "function") {
+              window.onkeypress(fakeEvt);
+            }
+          }, 20);
+        }
+      }, true);
+    <\/script>`;
+
+    fetch(BASE + "index.html")
+      .then(res => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.text();
+      })
+      .then(html => {
+        const injected = html.replace(/<head[^>]*>/i, match => match + shim);
+        const doc = frame.contentDocument || frame.contentWindow.document;
+        doc.open();
+        doc.write(injected);
+        doc.close();
+      })
+      .catch(err => {
+        const doc = frame.contentDocument || frame.contentWindow.document;
+        doc.open();
+        doc.write('<body style="background:#000;color:#0f0;font-family:monospace;padding:16px;">Error: ' + err.message + '</body>');
+        doc.close();
+      });
+  ]]></script>
+</svg>
