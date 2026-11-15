@@ -4,7 +4,7 @@
   </foreignObject>
   <script type="application/ecmascript"><![CDATA[
     const BASE = "https:/" + "/cdn.jsdelivr.net/gh/s-macke/jor1k@master/";
-    const SYS_BASE = "https:/" + "/cdn.jsdelivr.net/gh/s-macke/openrisc-sys@4c42195/";
+    const SYS_BASE = "https:/" + "/s-macke.github.io/jor1k/openrisc-sys/";
     const frame = document.getElementById("linux_frame");
 
     const workerShim = `<base href="${BASE}demos/" />
