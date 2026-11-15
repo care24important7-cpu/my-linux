@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const BASE = "https:/" + "/cdn.jsdelivr.net/gh/s-macke/jor1k@master/";
+    const frame = document.getElementById("jor1k_frame");
+
+    // Shim Web Workers & relative paths so jor1k's CPU worker runs cleanly inside an SVG iframe
+    const workerShim = `<base href="${BASE}" />
+    <script>
+      const OrigWorker = window.Worker;
+      window.Worker = function(url, opts) {
+        const fullUrl = new URL(url, "${BASE}").href;
+        const blob = new Blob(['importScripts("' + fullUrl + '");'], { type: "application/javascript" });
+        return new OrigWorker(URL.createObjectURL(blob), opts);
+      };
+    <\/script>`;
+
+    fetch(BASE + "index.html")
+      .then(res => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.text();
+      })
+      .then(html => {
+        // Rewrite root-relative paths (demos/, js/) so they resolve cleanly via jsDelivr
+        let fixed = html.replace(/<head[^>]*>/i, match => match + workerShim);
+        fixed = fixed.replace(/(src|href)=["']\/([^"']+)["']/gi, '$1="' + BASE + '$2"');
+
+        const win = frame.contentWindow;
+        const doc = frame.contentDocument || win.document;
+        doc.open();
+        doc.write(fixed);
+        doc.close();
+      })
+      .catch(err => {
+        const doc = frame.contentDocument || frame.contentWindow.document;
+        doc.open();
+        doc.write('<body style="background:#000;color:#0f0;font-family:monospace;padding:16px;">Error: ' + err.message + '</body>');
+        doc.close();
+      });
+  ]]></script>
+</svg>
