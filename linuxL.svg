@@ -4,7 +4,7 @@
   </foreignObject>
   <script type="application/ecmascript"><![CDATA[
     const BASE = "https:/" + "/cdn.jsdelivr.net/gh/s-macke/jor1k@master/";
-    const frame = document.getElementById("jor1k_frame");
+    const frame = document.getElementById("linux_frame");
 
     // Shim Web Workers & relative paths so jor1k's CPU worker runs cleanly inside an SVG iframe
     const workerShim = `<base href="${BASE}" />
