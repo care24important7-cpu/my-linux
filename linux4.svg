@@ -22,7 +22,7 @@
         Object.defineProperty(document, "cookie", { get: () => c, set: v => { c = v; } });
       }
     
-            // Enable Ctrl+V paste into JSLinux terminal via native paste or serial buffer
+            // Enable Ctrl+V paste via JSLinux Mobile's native input handler
       window.addEventListener("keydown", async (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
           e.preventDefault();
@@ -30,30 +30,26 @@
           try {
             const text = await navigator.clipboard.readText();
             if (!text) return;
-            const clean = text.replace(/\r\n/g, "\n").replace(/\n/g, "\r");
-            
-            if (window.term && typeof window.term.paste === "function") {
-              window.term.paste(clean);
-            } else if (typeof pc !== "undefined" && pc.serial) {
-              if (Array.isArray(pc.serial.receive_fifo)) {
-                for (let i = 0; i < clean.length; i++) {
-                  pc.serial.receive_fifo.push(clean.charCodeAt(i));
-                }
-                if (typeof pc.serial.update_irq === "function") pc.serial.update_irq();
-              } else {
-                // Fallback: 30ms interval with serial IRQ trigger
-                let idx = 0;
-                const t = setInterval(() => {
-                  if (idx >= clean.length) return clearInterval(t);
-                  pc.serial.send_char(clean.charCodeAt(idx++));
-                }, 30);
-              }
+            const clean = text.replace(/\r\n/g, "\n");
+            const target = document.querySelector("textarea, input[type='text']") || document.activeElement || document.body;
+
+            // Dispatch standard paste event first (supported by term.js / mobile input)
+            const dt = new DataTransfer();
+            dt.setData("text/plain", clean);
+            const pasteEvt = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+            target.dispatchEvent(pasteEvt);
+
+            // If target is a textarea/input, also trigger native input event
+            if (target.tagName === "TEXTAREA" || target.tagName === "INPUT") {
+              target.value = clean;
+              target.dispatchEvent(new Event("input", { bubbles: true }));
             }
           } catch (err) {
             console.warn("Clipboard paste blocked:", err);
           }
         }
       }, true);
+
 
 
     
