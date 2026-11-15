@@ -12,26 +12,32 @@
       const OrigWorker = window.Worker;
       window.Worker = function(url, opts) {
         const fullUrl = new URL(url, "${BASE}demos/").href;
-        const workerCode = \`
-          const OrigXHR = self.XMLHttpRequest;
-          self.XMLHttpRequest = function() {
-            const xhr = new OrigXHR();
-            const origOpen = xhr.open;
-            xhr.open = function(method, reqUrl) {
-              if (typeof reqUrl === "string" && !reqUrl.startsWith("http") && !reqUrl.startsWith("blob:")) {
-                if (reqUrl.includes("openrisc-sys") || reqUrl.includes("jor1k-sys")) {
-                  reqUrl = "${SYS_BASE}" + reqUrl.replace(/^.*?(openrisc-sys|jor1k-sys)\\//, "");
-                } else {
-                  reqUrl = new URL(reqUrl, "${BASE}demos/").href;
-                }
-              }
-              return origOpen.apply(this, [method, reqUrl, ...Array.prototype.slice.call(arguments, 2)]);
-            };
-            return xhr;
-          };
-          importScripts("\${fullUrl}");
-        \`;
-        const blob = new Blob([workerCode], { type: "application/javascript" });
+        const lines = [
+          'const SYS = "${SYS_BASE}";',
+          'const DEMOS = "${BASE}demos/";',
+          'const OrigXHR = self.XMLHttpRequest;',
+          'self.XMLHttpRequest = function() {',
+          '  const xhr = new OrigXHR();',
+          '  const origOpen = xhr.open;',
+          '  xhr.open = function(method, reqUrl) {',
+          '    if (typeof reqUrl === "string" && !reqUrl.startsWith("http") && !reqUrl.startsWith("blob:")) {',
+          '      let idx = reqUrl.indexOf("openrisc-sys/");',
+          '      if (idx !== -1) {',
+          '        reqUrl = SYS + reqUrl.substring(idx + 13);',
+          '      } else {',
+          '        idx = reqUrl.indexOf("jor1k-sys/");',
+          '        if (idx !== -1) reqUrl = SYS + reqUrl.substring(idx + 10);',
+          '        else reqUrl = new URL(reqUrl, DEMOS).href;',
+          '      }',
+          '    }',
+          '    const args = Array.prototype.slice.call(arguments, 2);',
+          '    return origOpen.apply(this, [method, reqUrl].concat(args));',
+          '  };',
+          '  return xhr;',
+          '};',
+          'importScripts("' + fullUrl + '");'
+        ];
+        const blob = new Blob([lines.join("\\n")], { type: "application/javascript" });
         return new OrigWorker(URL.createObjectURL(blob), opts);
       };
     <\/script>`;
