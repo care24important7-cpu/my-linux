@@ -22,7 +22,7 @@
         Object.defineProperty(document, "cookie", { get: () => c, set: v => { c = v; } });
       }
     
-            // Enable Ctrl+V paste via JSLinux Mobile's native input handler
+      // Enable Ctrl+V paste by feeding 1 character per input event for mobile.js
       window.addEventListener("keydown", async (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
           e.preventDefault();
@@ -31,24 +31,29 @@
             const text = await navigator.clipboard.readText();
             if (!text) return;
             const clean = text.replace(/\r\n/g, "\n");
-            const target = document.querySelector("textarea, input[type='text']") || document.activeElement || document.body;
+            const target = document.querySelector("textarea, input[type='text']") || document.activeElement;
+            if (!target) return;
 
-            // Dispatch standard paste event first (supported by term.js / mobile input)
-            const dt = new DataTransfer();
-            dt.setData("text/plain", clean);
-            const pasteEvt = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
-            target.dispatchEvent(pasteEvt);
-
-            // If target is a textarea/input, also trigger native input event
-            if (target.tagName === "TEXTAREA" || target.tagName === "INPUT") {
-              target.value = clean;
-              target.dispatchEvent(new Event("input", { bubbles: true }));
-            }
+            let idx = 0;
+            const typer = setInterval(() => {
+              if (idx >= clean.length) {
+                clearInterval(typer);
+                return;
+              }
+              const ch = clean[idx++];
+              if (ch === "\n") {
+                target.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, which: 13, bubbles: true }));
+              } else {
+                target.value = (target.value || "") + ch;
+                target.dispatchEvent(new Event("input", { bubbles: true }));
+              }
+            }, 15);
           } catch (err) {
             console.warn("Clipboard paste blocked:", err);
           }
         }
       }, true);
+
 
 
 
