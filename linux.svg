@@ -1,61 +1,62 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
-  <foreignObject width="100%" height="100%">
-    <html xmlns="http://w3.org">
-      <head>
-        <base href="https://jsdelivr.net" />
-      </head>
-      <body style="margin:0;background:#000;color:#0f0;font-family:monospace;">
-        <div id="status" style="padding:16px;">Booting JSLinux Mobile...</div>
-        <script>//<![CDATA[
-          const BASE = "https://jsdelivr.net";
-          fetch(BASE + "index.html")
-            .then(res => {
-              if (!res.ok) throw new Error("Failed to fetch index.html");
-              return res.text();
-            })
-            .then(html => {
-              const doc = new DOMParser().parseFromString(html, "text/html");
-              
-              // Copy stylesheets and head elements safely into XML DOM
-              Array.from(doc.head.children).forEach(el => {
-                if (el.tagName !== "SCRIPT") {
-                  document.head.appendChild(document.importNode(el, true));
-                }
-              });
-
-              // Replace body content safely using DOM importNode (avoids XML syntax errors)
-              document.body.innerHTML = "";
-              Array.from(doc.body.childNodes).forEach(node => {
-                if (node.nodeName !== "SCRIPT") {
-                  document.body.appendChild(document.importNode(node, true));
-                }
-              });
-
-              // Execute all scripts from head and body in exact sequence
-              const scripts = Array.from(doc.querySelectorAll("script"));
-              (function runNext(i) {
-                if (i >= scripts.length) {
-                  if (typeof window.onload === "function") window.onload();
-                  return;
-                }
-                const oldScript = scripts[i];
-                const newScript = document.createElementNS("http://w3.org", "script");
-                if (oldScript.src) {
-                  newScript.src = oldScript.getAttribute("src");
-                  newScript.onload = () => runNext(i + 1);
-                  newScript.onerror = () => runNext(i + 1);
-                } else {
-                  newScript.textContent = oldScript.textContent;
-                  runNext(i + 1);
-                }
-                document.body.appendChild(newScript);
-              })(0);
-            })
-            .catch(err => {
-              document.getElementById("status").textContent = "Error: " + err.message;
-            });
-        //]]></script>
-      </body>
-    </html>
+<svg xmlns="http://w3.org" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <div xmlns="http://w3.org" id="app" style="width:100vw;height:100vh;margin:0;padding:0;background:#000;color:#0f0;font-family:monospace;">
+      <div id="status" style="padding:16px;">Booting JSLinux Mobile...</div>
+    </div>
   </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const BASE = "https://jsdelivr.net";
+    const XHTML = "http://w3.org";
+
+    // Ensure relative XHRs and scripts resolve to Jaromaz's repo
+    const baseEl = document.createElementNS(XHTML, "base");
+    baseEl.setAttribute("href", BASE);
+    document.documentElement.insertBefore(baseEl, document.documentElement.firstChild);
+
+    fetch(BASE + "index.html")
+      .then(res => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.text();
+      })
+      .then(html => {
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const app = document.getElementById("app");
+        app.innerHTML = "";
+
+        // Import CSS styles
+        doc.querySelectorAll("link[rel='stylesheet'], style").forEach(el => {
+          app.appendChild(document.importNode(el, true));
+        });
+
+        // Import body elements (excluding scripts)
+        Array.from(doc.body.childNodes).forEach(node => {
+          if (node.nodeName !== "SCRIPT") {
+            app.appendChild(document.importNode(node, true));
+          }
+        });
+
+        // Load and run all scripts sequentially
+        const scripts = Array.from(doc.querySelectorAll("script"));
+        (function runNext(i) {
+          if (i >= scripts.length) {
+            if (typeof window.onload === "function") window.onload();
+            return;
+          }
+          const oldScript = scripts[i];
+          const newScript = document.createElementNS("http://w3.org", "script");
+          if (oldScript.src) {
+            newScript.setAttribute("href", BASE + oldScript.getAttribute("src"));
+            newScript.onload = () => runNext(i + 1);
+            newScript.onerror = () => runNext(i + 1);
+          } else {
+            newScript.textContent = oldScript.textContent;
+            runNext(i + 1);
+          }
+          document.documentElement.appendChild(newScript);
+        })(0);
+      })
+      .catch(err => {
+        document.getElementById("status").textContent = "Error: " + err.message;
+      });
+  ]]></script>
 </svg>
