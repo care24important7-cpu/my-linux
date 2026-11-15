@@ -21,7 +21,7 @@
         Object.defineProperty(document, "cookie", { get: () => c, set: v => { c = v; } });
       }
 
-      // Reliable Ctrl+V paste without regexes (uses prompt fallback + onkeypress)
+      // Reliable Ctrl+V paste directly into pc.serial.send_char() with 40ms pacing
       window.addEventListener("keydown", async (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
           e.preventDefault();
@@ -35,7 +35,7 @@
           }
           if (!text) return;
 
-          const clean = text.split("\\r\\n").join("\\n");
+          const clean = text.split("\\r\\n").join("\\n").split("\\n").join("\\r");
           let idx = 0;
 
           const typer = setInterval(() => {
@@ -43,31 +43,11 @@
               clearInterval(typer);
               return;
             }
-            const ch = clean[idx++];
-            const isEnter = ch === "\\n";
-            const code = isEnter ? 13 : ch.charCodeAt(0);
-            const fakeEvt = {
-              type: isEnter ? "keydown" : "keypress",
-              key: isEnter ? "Enter" : ch,
-              charCode: isEnter ? 0 : code,
-              keyCode: code,
-              which: code,
-              ctrlKey: false,
-              altKey: false,
-              metaKey: false,
-              shiftKey: false,
-              preventDefault: () => {},
-              stopPropagation: () => {}
-            };
-
-            if (isEnter && typeof document.onkeydown === "function") {
-              document.onkeydown(fakeEvt);
-            } else if (typeof document.onkeypress === "function") {
-              document.onkeypress(fakeEvt);
-            } else if (typeof window.onkeypress === "function") {
-              window.onkeypress(fakeEvt);
+            const code = clean.charCodeAt(idx++);
+            if (typeof pc !== "undefined" && pc.serial && typeof pc.serial.send_char === "function") {
+              pc.serial.send_char(code);
             }
-          }, 20);
+          }, 40);
         }
       }, true);
     <\/script>`;
