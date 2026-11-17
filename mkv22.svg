@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  
+  <script type="application/ecmascript">
+    const EBML_URL = "https:/" + "/cdn.jsdelivr.net/npm/ts-ebml@3.0.2/dist/EBML.min.js";
+    const MUX_URL = "https:/" + "/cdn.jsdelivr.net/npm/mux.js@7.0.3/dist/mux.min.js";
+    const frame = document.getElementById("linux_frame");
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+    <style>
+      body,html{margin:0;padding:0;background:#000;color:#eee;font-family:monospace;height:100%;display:flex;flex-direction:column;overflow:hidden}
+      #bar{padding:8px;background:#1a1a1a;display:flex;gap:8px;align-items:center;border-bottom:1px solid #333;font-size:12px}
+      video{flex:1;width:100%;height:100%;background:#000;outline:none}
+      button,input{background:#2d2d2d;color:#fff;border:1px solid #444;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px}
+      #msg{margin-left:auto;color:#7f7}
+    </style>
+    <script>
+      try{window.localStorage}catch(e){Object.defineProperty(window,"localStorage",{value:{}})}
+      try{document.cookie}catch(e){Object.defineProperty(document,"cookie",{get:()=>"",set:()=>""})}
+    <\/script>
+    <script src="` + EBML_URL + `"><\/script>
+    <script src="` + MUX_URL + `"><\/script>
+    </head><body>
+    <div id="bar">
+      <input type="file" id="f" accept=".mkv,.webm,.mp4" />
+      <button id="btn">Pause</button>
+      <span id="msg">Ready (Pure-JS EBML + MSE MKV Player)</span>
+    </div>
+    <video id="v" controls autoplay></video>
+    <script>
+      const v = document.getElementById("v"), msg = document.getElementById("msg"), fileIn = document.getElementById("f");
+      document.getElementById("btn").onclick = () => {
+        if (v.paused) { v.play(); document.getElementById("btn").textContent = "Pause"; }
+        else { v.pause(); document.getElementById("btn").textContent = "Play"; }
+      };
+
+      fileIn.onchange = async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        msg.textContent = "Parsing Matroska EBML headers...";
+
+        const blobUrl = URL.createObjectURL(file);
+        v.src = blobUrl;
+        v.onerror = async () => {
+          msg.textContent = "Remuxing MKV via pure-JS EBML...";
+          try {
+            const buf = await file.slice(0, Math.min(file.size, 32 * 1024 * 1024)).arrayBuffer();
+            const decoder = new EBML.Decoder();
+            const elms = decoder.decode(buf);
+            const reader = new EBML.Reader();
+            elms.forEach(el => reader.read(el));
+            reader.stop();
+            const refined = EBML.tools.makeMetadataSeekable(reader.metadatas, reader.duration, reader.cues);
+            const body = buf.slice(reader.metadataSize);
+            const fixedBlob = new Blob([refined, body], { type: "video/webm" });
+            v.src = URL.createObjectURL(fixedBlob);
+            msg.textContent = "Playing remuxed stream (" + file.name + ")";
+          } catch (err) {
+            msg.textContent = "Unsupported audio/video track codec in browser MSE: " + err.message;
+          }
+        };
+        v.onloadedmetadata = () => {
+          msg.textContent = "Playing: " + file.name + " (" + Math.round(v.duration || 0) + "s)";
+        };
+      };
+    <\/script></body></html>`;
+
+    const doc = frame.contentDocument || frame.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+  </script>
+</svg>
