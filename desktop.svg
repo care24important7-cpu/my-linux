@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const REPO = "https:/" + "/cdn.jsdelivr.net/gh/care24important7-cpu/my-linux@main/";
+    const frame = document.getElementById("os_frame");
+    fetch(REPO + "desktop.html?t=" + Date.now())
+      .then(r => r.text())
+      .then(html => {
+        const doc = frame.contentDocument || frame.contentWindow.document;
+        doc.open();
+        doc.write(html.replace("<head>", '<head><base href="' + REPO + '" />'));
+        doc.close();
+      });
+  ]]></script>
+</svg>
