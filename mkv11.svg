@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const FF = "https:/" + "/cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js";
+    const CORE = "https:/" + "/cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js";
+    const DMX = "https:/" + "/cdn.jsdelivr.net/npm/web-demuxer@4.0.0/dist/web-demuxer.js";
+    const WASM = "https:/" + "/cdn.jsdelivr.net/npm/web-demuxer@4.0.0/dist/wasm-files/web-demuxer.wasm";
+    const frame = document.getElementById("linux_frame");
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+    <style>
+      body,html{margin:0;padding:0;background:#000;color:#eee;font-family:monospace;height:100%;display:flex;flex-direction:column;overflow:hidden}
+      #bar{padding:8px;background:#1a1a1a;display:flex;gap:8px;align-items:center;border-bottom:1px solid #333;font-size:12px}
+      #cv{flex:1;width:100%;height:100%;object-fit:contain;background:#000}
+      #msg{margin-left:auto;color:#7f7}
+    </style>
+    <script>
+      const Wk = window.Worker;
+      window.Worker = (u, o) => String(u).startsWith("blob:") ? new Wk(u, o) : new Wk(URL.createObjectURL(new Blob(['importScripts("' + u + '");'], { type: "application/javascript" })), o);
+    <\/script>
+    <script src="${FF}"><\/script>
+    </head><body>
+    <div id="bar">
+      <input type="file" id="f" accept=".mkv,.webm,.mp4" disabled />
+      <button id="btn">Pause</button>
+      <input type="range" id="seek" min="0" max="1000" value="0" style="width:150px" disabled />
+      <span id="msg">Loading...</span>
+    </div>
+    <canvas id="cv"></canvas>
+    <script type="module">
+      import { WebDemuxer } from "${DMX}";
+      const cv = document.getElementById("cv"), ctx = cv.getContext("2d"), msg = document.getElementById("msg"), fileIn = document.getElementById("f"), seek = document.getElementById("seek");
+      let play = true, runId = 0, ff = null, actx = null, nextT = 0, jumpTo = -1;
+
+      document.getElementById("btn").onclick = async () => { play = !play; document.getElementById("btn").textContent = play ? "Pause" : "Play"; if (actx) play ? await actx.resume() : await actx.suspend(); };
+      (async () => { ff = FFmpeg.createFFmpeg({ corePath: "${CORE}", mainName: "main", log: false }); await ff.load(); fileIn.disabled = false; msg.textContent = "Ready"; })();
+
+      async function readAll(s) { const a = [], r = s.getReader(); while (true) { const { done, value } = await r.read(); if (done) break; if (value) a.push(value); } return a; }
+      const cat = arr => { const res = new Uint8Array(arr.reduce((s, b) => s + b.length, 0)); let o = 0; for (const b of arr) { res.set(b, o); o += b.length; } return res; };
+
+      function annexB(avcC, pkt) {
+        const out = [], sc = Uint8Array.of(0, 0, 0, 1);
+        if (avcC && avcC.length >= 7) {
+          let p = 5, ns = avcC.at(p++) & 31;
+          for (let i = 0; i < ns; i++) { const l = (avcC.at(p) << 8) | avcC.at(p + 1); p += 2; out.push(sc, avcC.subarray(p, p + l)); p += l; }
+          const np = avcC.at(p++);
+          for (let i = 0; i < np; i++) { const l = (avcC.at(p) << 8) | avcC.at(p + 1); p += 2; out.push(sc, avcC.subarray(p, p + l)); p += l; }
+        }
+        for (let p = 0; p + 4 <= pkt.length;) {
+          const l = (pkt.at(p) << 24) | (pkt.at(p + 1) << 16) | (pkt.at(p + 2) << 8) | pkt.at(p + 3); p += 4;
+          if (l <= 0 || p + l > pkt.length) break;
+          out.push(sc, pkt.subarray(p, p + l)); p += l;
+        }
+        return cat(out);
+      }
+
+      function adts(raw, asc) {
+        const b0 = asc && asc.length >= 2 ? asc.at(0) : 0x11, b1 = asc && asc.length >= 2 ? asc.at(1) : 0x90, len = raw.length + 7;
+        return cat([Uint8Array.of(0xFF, 0xF1, (((b0 >> 3) - 1) & 3) << 6 | ((((b0 & 7) << 1) | (b1 >> 7)) & 15) << 2 | (((b1 >> 3) & 15) >> 2 & 1), (((b1 >> 3) & 15) & 3) << 6 | ((len >> 11) & 3), (len >> 3) & 0xFF, ((len & 7) << 5) | 0x1F, 0xFC), raw]);
+      }
+
+      function playPcm(pcm) {
+        if (!pcm || pcm.byteLength < 16) return 0;
+        if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+        const n = Math.floor(pcm.byteLength / 8), f32 = new Float32Array(pcm.buffer, pcm.byteOffset, n * 2);
+        const buf = actx.createBuffer(2, n, 48000), L = buf.getChannelData(0), R = buf.getChannelData(1);
+        for (let i = 0; i < n; i++) { L.set(Float32Array.of(f32.at(i * 2)), i); R.set(Float32Array.of(f32.at(i * 2 + 1)), i); }
+        const s = actx.createBufferSource(); s.buffer = buf; s.connect(actx.destination);
+        const t = Math.max(actx.currentTime + 0.05, nextT); s.start(t); nextT = t + buf.duration; return buf.duration;
+      }
+
+      fileIn.onchange = async (e) => {
+        const file = e.target.files ? e.target.files.item(0) : null;
+        if (!file || !ff) return;
+        const id = ++runId; play = true; msg.textContent = "Opening...";
+        const dmx = new WebDemuxer({ wasmFilePath: "${WASM}" }); await dmx.load(file);
+        const info = await dmx.getMediaInfo(), vCfg = await dmx.getDecoderConfig("video").catch(() => null), aCfg = await dmx.getDecoderConfig("audio").catch(() => null);
+        const vPriv = vCfg && vCfg.description ? new Uint8Array(vCfg.description) : null, aPriv = aCfg && aCfg.description ? new Uint8Array(aCfg.description) : null;
+        const W = 512, H = 288, durTotal = info.duration || 1430, fBytes = W * H * 4, img = ctx.createImageData(W, H);
+        cv.width = W; cv.height = H;
+        if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+        nextT = actx.currentTime; seek.disabled = false; seek.oninput = () => { jumpTo = (seek.value / 1000) * durTotal; };
+
+        let tCur = 0, drawn = 0;
+        while (id === runId && tCur < durTotal) {
+          if (jumpTo >= 0) { tCur = jumpTo; jumpTo = -1; nextT = actx.currentTime; }
+          if (!play) { await new Promise(r => setTimeout(r, 50)); continue; }
+          const rawV = await readAll(dmx.readMediaPacket("video", tCur, Math.min(durTotal, tCur + 9)));
+          if (!rawV.length) { tCur += 3; continue; }
+
+          let sIdx = Math.max(0, rawV.findIndex(p => p.type === "key")), eIdx = rawV.length;
+          for (let k = sIdx + 1; k < rawV.length; k++) if (rawV.at(k).type === "key" && rawV.at(k).timestamp - rawV.at(sIdx).timestamp >= 2.5) { eIdx = k; break; }
+          const vPkts = rawV.slice(sIdx, eIdx), t0 = vPkts.at(0).timestamp, t1 = eIdx < rawV.length ? rawV.at(eIdx).timestamp : vPkts.at(-1).timestamp + 0.042;
+          seek.value = Math.floor((t0 / durTotal) * 1000);
+
+          const aPkts = aCfg ? await readAll(dmx.readMediaPacket("audio", t0, t1)) : [];
+          ff.FS("writeFile", "v.h264", cat(vPkts.map((p, k) => annexB(k === 0 ? vPriv : null, new Uint8Array(p.data)))));
+          const args = ["-r", "23.976", "-f", "h264", "-i", "v.h264"];
+          if (aPkts.length) { ff.FS("writeFile", "a.aac", cat(aPkts.map(p => adts(new Uint8Array(p.data), aPriv)))); args.push("-f", "aac", "-i", "a.aac"); }
+          args.push("-map", "0:v:0", "-vf", "scale=" + W + ":" + H, "-f", "rawvideo", "-pix_fmt", "rgba", "out.rgba");
+          if (aPkts.length) args.push("-map", "1:a:0", "-ac", "2", "-ar", "48000", "-f", "f32le", "out.pcm");
+
+          try { await ff.run(...args); } catch (_) {}
+          let raw = null, pcm = null;
+          try { raw = ff.FS("readFile", "out.rgba"); ff.FS("unlink", "out.rgba"); } catch (_) {}
+          try { pcm = ff.FS("readFile", "out.pcm"); ff.FS("unlink", "out.pcm"); } catch (_) {}
+          try { ff.FS("unlink", "v.h264"); ff.FS("unlink", "a.aac"); } catch (_) {}
+
+          const total = raw ? Math.floor(raw.length / fBytes) : 0;
+          if (total > 0 && id === runId) {
+            const dur = playPcm(pcm), delay = dur > 0 ? Math.max(15, (dur * 1000) / total) : 41.7;
+            for (let i = 0; i < total && id === runId && jumpTo < 0; i++) {
+              while (!play && id === runId && jumpTo < 0) await new Promise(r => setTimeout(r, 50));
+              img.data.set(raw.subarray(i * fBytes, (i + 1) * fBytes)); ctx.putImageData(img, 0, 0); drawn++;
+              if (drawn % 5 === 1) msg.textContent = "Playing " + (t0 + i / 24).toFixed(0) + "s / " + durTotal.toFixed(0) + "s";
+              await new Promise(r => setTimeout(r, delay));
+            }
+          }
+          tCur = t1;
+        }
+        if (id === runId) msg.textContent = "Finished (" + drawn + " frames)";
+      };
+    <\/script></body></html>`;
+
+    const doc = frame.contentDocument || frame.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+  ]]></script>
+</svg>
