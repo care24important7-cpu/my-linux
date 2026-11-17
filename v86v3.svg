@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const frame = document.getElementById("linux_frame");
+    const V86_BUILD = "https:/" + "/cdn.jsdelivr.net/npm/v86@latest/build/";
+    const V86_BIOS = "https:/" + "/cdn.jsdelivr.net/gh/copy/v86@master/bios/";
+    const V86_IMG = "https:/" + "/i.copy.sh/";
+
+    const pageHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { margin: 0; background: #111; color: #eee; font-family: monospace; display: flex; flex-direction: column; height: 100vh; }
+    #bar { padding: 8px 12px; background: #222; border-bottom: 1px solid #333; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    button, label.btn { background: #2d6cdf; color: #fff; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-family: monospace; font-weight: bold; font-size: 12px; }
+    button:hover, label.btn:hover { background: #1b56c2; }
+    #status { color: #0f0; margin-left: auto; font-size: 12px; }
+    #screen_container { flex: 1; overflow: auto; padding: 8px; }
+    #screen_container div { white-space: pre; font: 14px monospace; line-height: 14px; }
+    canvas { display: block; margin: 0 auto; }
+  </style>
+  <script src="${V86_BUILD}libv86.js"><\/script>
+</head>
+<body>
+  <div id="bar">
+    <span><b>v86:</b></span>
+    <button onclick="bootOS('buildroot')">1. Buildroot Linux</button>
+    <button onclick="bootOS('tinycore')">2. TinyCore Desktop</button>
+    <button onclick="bootOS('linux4')">3. Linux 4 ISO</button>
+    <label class="btn">4. Boot Local .iso/.img <input type="file" id="local_iso" style="display:none" onchange="bootLocal(this.files[0])" /></label>
+    <span id="status">Select an OS above to boot...</span>
+  </div>
+  <div id="screen_container">
+    <div></div>
+    <canvas style="display:none"></canvas>
+  </div>
+  <script>
+    let emulator = null;
+    function startVM(extraCfg, label) {
+      if (emulator) { try { emulator.stop(); } catch (e) {} }
+      const status = document.getElementById("status");
+      status.textContent = "Starting " + label + "...";
+
+      const cfg = Object.assign({
+        wasm_path: "${V86_BUILD}v86.wasm",
+        memory_size: 128 * 1024 * 1024,
+        vga_memory_size: 8 * 1024 * 1024,
+        screen_container: document.getElementById("screen_container"),
+        bios: { url: "${V86_BIOS}seabios.bin" },
+        vga_bios: { url: "${V86_BIOS}vgabios.bin" },
+        autostart: true
+      }, extraCfg);
+
+      emulator = new V86(cfg);
+      emulator.add_listener("emulator-ready", () => {
+        status.textContent = "Running " + label + " (Click screen to capture mouse, Esc to release)";
+      });
+    }
+
+    function bootOS(type) {
+      if (type === "buildroot") {
+        startVM({ bzimage: { url: "${V86_IMG}buildroot-bzimage68.bin" }, cmdline: "tsc=reliable mitigations=off random.trust_cpu=on" }, "Buildroot Linux");
+      } else if (type === "tinycore") {
+        startVM({ cdrom: { url: "${V86_IMG}TinyCore-11.0.iso" } }, "TinyCore 11 Desktop");
+      } else if (type === "linux4") {
+        startVM({ cdrom: { url: "${V86_IMG}linux4.iso" } }, "Linux 4 ISO");
+      }
+    }
+
+    function bootLocal(file) {
+      if (!file) return;
+      const isIso = file.name.toLowerCase().endsWith(".iso");
+      startVM(isIso ? { cdrom: { buffer: file } } : { hda: { buffer: file } }, file.name);
+    }
+  <\/script>
+</body>
+</html>`;
+
+    const doc = frame.contentDocument || frame.contentWindow.document;
+    doc.open();
+    doc.write(pageHtml);
+    doc.close();
+  ]]></script>
+</svg>
