@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const frame = document.getElementById("linux_frame");
+    const V86_BUILD = "https:/" + "/cdn.jsdelivr.net/npm/v86@latest/build/";
+    const V86_BIOS = "https:/" + "/cdn.jsdelivr.net/gh/copy/v86@master/bios/";
+
+    const pageHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { margin: 0; background: #111; color: #eee; font-family: monospace; display: flex; flex-direction: column; height: 100vh; }
+    #bar { padding: 6px 10px; background: #222; border-bottom: 1px solid #333; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    button, label.btn { background: #2d6cdf; color: #fff; border: none; padding: 5px 9px; border-radius: 4px; cursor: pointer; font-family: monospace; font-weight: bold; font-size: 12px; }
+    button:hover, label.btn:hover { background: #1b56c2; }
+    button.zoom { background: #2e8b57; }
+    button.zoom:hover { background: #236b43; }
+    #status { color: #0f0; margin-left: auto; font-size: 12px; }
+    #screen_container { flex: 1; overflow: auto; display: flex; justify-content: center; align-items: center; }
+    #screen_container div { white-space: pre; font: 14px monospace; line-height: 14px; }
+    canvas { display: block; image-rendering: pixelated; }
+  </style>
+  <script src="${V86_BUILD}libv86.js"><\/script>
+</head>
+<body>
+  <div id="bar">
+    <span><b>v86:</b></span>
+    <label class="btn">Boot Local .iso/.img <input type="file" id="local_iso" style="display:none" onchange="bootLocal(this.files[0])" /></label>
+    <button class="zoom" onclick="setScale(1)">Zoom 1x</button>
+    <button class="zoom" onclick="setScale(1.5)">Zoom 1.5x</button>
+    <button class="zoom" onclick="setScale(2)">Zoom 2x</button>
+    <button class="zoom" onclick="goFullscreen()">Fullscreen</button>
+    <span id="status">Select TinyCore-current.iso to boot...</span>
+  </div>
+  <div id="screen_container">
+    <div></div>
+    <canvas style="display:none"></canvas>
+  </div>
+  <script>
+    let emulator = null;
+    function startVM(extraCfg, label) {
+      if (emulator) { try { emulator.stop(); } catch (e) {} }
+      const status = document.getElementById("status");
+      status.textContent = "Starting " + label + "...";
+
+      const cfg = Object.assign({
+        wasm_path: "${V86_BUILD}v86.wasm",
+        memory_size: 256 * 1024 * 1024,
+        vga_memory_size: 16 * 1024 * 1024,
+        screen_container: document.getElementById("screen_container"),
+        bios: { url: "${V86_BIOS}seabios.bin" },
+        vga_bios: { url: "${V86_BIOS}vgabios.bin" },
+        autostart: true
+      }, extraCfg);
+
+      emulator = new V86(cfg);
+      emulator.add_listener("emulator-ready", () => {
+        emulator.screen_set_scale(1.5, 1.5);
+        status.textContent = "Running " + label + " (Click screen to capture mouse, Esc to release)";
+      });
+    }
+
+    function setScale(s) {
+      if (emulator) emulator.screen_set_scale(s, s);
+    }
+
+    function goFullscreen() {
+      const el = document.documentElement;
+      if (el.requestFullscreen) el.requestFullscreen();
+    }
+
+    function bootLocal(file) {
+      if (!file) return;
+      const isIso = file.name.toLowerCase().endsWith(".iso");
+      startVM(isIso ? { cdrom: { buffer: file } } : { hda: { buffer: file } }, file.name);
+    }
+  <\/script>
+</body>
+</html>`;
+
+    const doc = frame.contentDocument || frame.contentWindow.document;
+    doc.open();
+    doc.write(pageHtml);
+    doc.close();
+  ]]></script>
+</svg>
