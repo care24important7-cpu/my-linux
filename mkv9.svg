@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const FF_JS = "https:/" + "/cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js";
+    const CORE_JS = "https:/" + "/cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js";
+    const frame = document.getElementById("linux_frame");
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+    <style>
+      body,html{margin:0;padding:0;background:#000;color:#eee;font-family:monospace;height:100%;display:flex;flex-direction:column;overflow:hidden}
+      #bar{padding:8px;background:#1a1a1a;display:flex;gap:8px;align-items:center;border-bottom:1px solid #333;font-size:12px}
+      #cv{flex:1;width:100%;height:100%;object-fit:contain;background:#000}
+      #msg{margin-left:auto;color:#7f7}
+    </style>
+    <script>
+      const OrigWorker = window.Worker;
+      window.Worker = function(url, opts) {
+        const blob = new Blob(['importScripts("' + url + '");'], { type: "application/javascript" });
+        return new OrigWorker(URL.createObjectURL(blob), opts);
+      };
+    <\/script>
+    <script src="${FF_JS}"><\/script>
+    </head><body>
+    <div id="bar">
+      <input type="file" id="f" accept=".mkv,.webm,.mp4" disabled />
+      <button id="btn">Pause</button>
+      <span id="msg">Loading FFmpeg-ST software decoder...</span>
+    </div>
+    <canvas id="cv"></canvas>
+    <script>
+      const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+      const msg = document.getElementById("msg"), fileIn = document.getElementById("f");
+      let play = true, running = false, ffmpeg = null;
+
+      document.getElementById("btn").onclick = () => {
+        play = !play;
+        document.getElementById("btn").textContent = play ? "Pause" : "Play";
+      };
+
+      (async () => {
+        try {
+          const { createFFmpeg, fetchFile } = FFmpeg;
+          window._fetchFile = fetchFile;
+          ffmpeg = createFFmpeg({
+            corePath: "${CORE_JS}",
+            mainName: "main",
+            log: false
+          });
+          await ffmpeg.load();
+          fileIn.disabled = false;
+          msg.textContent = "FFmpeg-ST SW Ready (Select .mkv)";
+        } catch (e) {
+          msg.textContent = "Load ERR: " + e.message;
+        }
+      })();
+
+      fileIn.onchange = async (e) => {
+        const file = e.target.files && e.target.files;
+        if (!file || !ffmpeg) return;
+        running = false;
+        await new Promise(r => setTimeout(r, 80));
+        running = true;
+
+        msg.textContent = "Loading " + (file.size / 1048576).toFixed(1) + " MB...";
+        ffmpeg.FS("writeFile", "in.mkv", await window._fetchFile(file));
+
+        const W = 640, H = 360;
+        cv.width = W; cv.height = H;
+        const imgData = ctx.createImageData(W, H);
+        let chunkIdx = 0, drawn = 0;
+
+        while (running) {
+          if (!play) { await new Promise(r => setTimeout(r, 50)); continue; }
+          const ss = (chunkIdx * 2).toString();
+          await ffmpeg.run(
+            "-ss", ss, "-t", "2", "-i", "in.mkv",
+            "-vf", "scale=" + W + ":" + H, "-r", "24",
+            "-f", "rawvideo", "-pix_fmt", "rgba", "out.rgba"
+          );
+          let raw;
+          try { raw = ffmpeg.FS("readFile", "out.rgba"); } catch (err) { break; }
+          if (!raw || raw.length < W * H * 4) break;
+          ffmpeg.FS("unlink", "out.rgba");
+
+          const frameBytes = W * H * 4;
+          const total = Math.floor(raw.length / frameBytes);
+          for (let i = 0; i < total && running; i++) {
+            while (!play && running) await new Promise(r => setTimeout(r, 50));
+            imgData.data.set(raw.subarray(i * frameBytes, (i + 1) * frameBytes));
+            ctx.putImageData(imgData, 0, 0);
+            drawn++;
+            msg.textContent = "SW Playing: " + (chunkIdx * 2 + (i / 24)).toFixed(1) + "s | Frame " + drawn;
+            await new Promise(r => setTimeout(r, 41));
+          }
+          chunkIdx++;
+        }
+        if (running) msg.textContent = "Finished (" + drawn + " frames)";
+      };
+    <\/script></body></html>`;
+
+    const doc = frame.contentDocument || frame.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+  ]]></script>
+</svg>
