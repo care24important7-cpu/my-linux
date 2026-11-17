@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const CDN = "https:/" + "/cdn.jsdelivr.net/npm/@libav.js/variant-default@6.10.9/dist/";
+    const frame = document.getElementById("linux_frame");
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+    <base href="${CDN}" />
+    <style>
+      body,html{margin:0;padding:0;background:#000;color:#eee;font-family:monospace;height:100%;display:flex;flex-direction:column;overflow:hidden}
+      #bar{padding:8px;background:#1a1a1a;display:flex;gap:8px;align-items:center;border-bottom:1px solid #333;font-size:12px}
+      #cv{flex:1;width:100%;height:100%;object-fit:contain;background:#000}
+      #msg{margin-left:auto;color:#7f7}
+    </style>
+    <script src="libav-6.10.9.0-default.js"><\/script>
+    </head><body>
+    <div id="bar">
+      <input type="file" id="f" accept=".mkv,.webm,.mp4" disabled />
+      <button id="btn">Pause</button>
+      <span id="msg">Loading libav.js SW decoder...</span>
+    </div>
+    <canvas id="cv"></canvas>
+    <script>
+      const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+      const msg = document.getElementById("msg"), fileIn = document.getElementById("f");
+      let libav = null, play = true, running = false;
+
+      document.getElementById("btn").onclick = () => {
+        play = !play;
+        document.getElementById("btn").textContent = play ? "Pause" : "Play";
+      };
+
+      (async () => {
+        try {
+          libav = await LibAV.LibAV({ noworker: true });
+          fileIn.disabled = false;
+          msg.textContent = "libav.js Ready (Select .mkv)";
+        } catch (e) {
+          msg.textContent = "Init ERR: " + e.message;
+        }
+      })();
+
+      fileIn.onchange = async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file || !libav) return;
+        running = false;
+        await new Promise(r => setTimeout(r, 60));
+        running = true;
+
+        msg.textContent = "Loading " + (file.size / 1048576).toFixed(1) + " MB into MEMFS...";
+        const fname = "input.mkv";
+        await libav.writeFile(fname, new Uint8Array(await file.arrayBuffer()));
+
+        const [fmt_ctx, streams] = await libav.ff_init_demuxer_file(fname);
+        const vStream = streams.find(s => s.codec_type === libav.AVMEDIA_TYPE_VIDEO);
+        if (!vStream) { msg.textContent = "No video stream found"; return; }
+
+        const [, c, pkt, framePtr] = await libav.ff_init_decoder(vStream.codec_id, vStream.codecpar);
+        const rgbFrame = await libav.av_frame_alloc();
+        let sws = null, w = 0, h = 0, decoded = 0;
+
+        msg.textContent = "Decoding software frames...";
+        while (running) {
+          if (!play) { await new Promise(r => setTimeout(r, 50)); continue; }
+          const [res, packets] = await libav.ff_read_multi(fmt_ctx, pkt, fname, { limit: 1024 * 64, unref: true });
+          const vPkts = packets[vStream.index] || [];
+          if (vPkts.length) {
+            const frames = await libav.ff_decode_multi(c, pkt, framePtr, vPkts, res === libav.AVERROR_EOF);
+            for (const f of frames) {
+              if (!running) break;
+              if (!sws || w !== f.width || h !== f.height) {
+                w = cv.width = f.width;
+                h = cv.height = f.height;
+                if (sws) await libav.sws_freeContext(sws);
+                sws = await libav.sws_getContext(w, h, f.format, w, h, libav.AV_PIX_FMT_RGBA, 2, 0, 0, 0);
+              }
+              await libav.sws_scale_frame(sws, rgbFrame, f);
+              const rgba = await libav.ff_copyout_frame(rgbFrame);
+              if (rgba && rgba.data) {
+                ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba.data.buffer, rgba.data.byteOffset, w * h * 4), w, h), 0, 0);
+                decoded++;
+                if (decoded % 5 === 1) msg.textContent = "SW Playing: Frame " + decoded + " (" + w + "x" + h + ")";
+              }
+              await new Promise(r => setTimeout(r, 16));
+            }
+          }
+          if (res === libav.AVERROR_EOF) { msg.textContent = "Finished (" + decoded + " frames)"; break; }
+        }
+      };
+    <\/script></body></html>`;
+
+    const doc = frame.contentDocument || frame.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+  ]]></script>
+</svg>
