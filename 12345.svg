@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const FF = "https:/" + "/cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js";
+    const CORE = "https:/" + "/cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js";
+    const DMX = "https:/" + "/cdn.jsdelivr.net/npm/web-demuxer@4.0.0/dist/web-demuxer.js";
+    const WASM = "https:/" + "/cdn.jsdelivr.net/npm/web-demuxer@4.0.0/dist/wasm-files/web-demuxer.wasm";
+    const frame = document.getElementById("linux_frame");
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+    <style>
+      body,html{margin:0;padding:0;background:#000;color:#eee;font-family:monospace;height:100%;display:flex;flex-direction:column;overflow:hidden}
+      #bar{padding:8px;background:#1a1a1a;display:flex;gap:8px;align-items:center;border-bottom:1px solid #333;font-size:12px}
+      #cv{flex:1;width:100%;height:100%;object-fit:contain;background:#000}
+      #msg{margin-left:auto;color:#7f7}
+    </style>
+    <script>
+      const Wk = window.Worker;
+      window.Worker = function(u, o) {
+        if (String(u).startsWith("blob:")) return new Wk(u, o);
+        return new Wk(URL.createObjectURL(new Blob(['importScripts("' + u + '");'], { type: "application/javascript" })), o);
+      };
+    <\/script>
+    <script src="${FF}"><\/script>
+    </head><body>
+    <div id="bar">
+      <input type="file" id="f" accept=".mkv,.webm,.mp4" disabled />
+      <button id="btn">Pause</button>
+      <span id="msg">Loading engines...</span>
+    </div>
+    <canvas id="cv"></canvas>
+    <script type="module">
+      import { WebDemuxer } from "${DMX}";
+      const cv = document.getElementById("cv"), ctx = cv.getContext("2d"), msg = document.getElementById("msg"), fileIn = document.getElementById("f");
+      let play = true, runId = 0, ff = null, actx = null, nextT = 0;
+
+      document.getElementById("btn").onclick = async () => {
+        play = !play; document.getElementById("btn").textContent = play ? "Pause" : "Play";
+        if (actx) play ? await actx.resume() : await actx.suspend();
+      };
+
+      (async () => {
+        ff = FFmpeg.createFFmpeg({ corePath: "${CORE}", mainName: "main", log: false });
+        await ff.load(); fileIn.disabled = false; msg.textContent = "Ready (Select .mkv)";
+      })();
+
+      async function collectPackets(stream) {
+        const list = [];
+        const reader = stream.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) list.push(value);
+        }
+        return list;
+      }
+
+      function annexB(avcC, pkt) {
+        const out = [], sc = new Uint8Array();
+        if (avcC) {
+          let p = 5, ns = avcC[p++] & 31;
+          for (let i = 0; i < ns; i++) { const l = (avcC[p]<<8)|avcC[p+1]; p+=2; out.push(sc, avcC.subarray(p, p+l)); p+=l; }
+          let np = avcC[p++];
+          for (let i = 0; i < np; i++) { const l = (avcC[p]<<8)|avcC[p+1]; p+=2; out.push(sc, avcC.subarray(p, p+l)); p+=l; }
+        }
+        let p = 0;
+        while (p + 4 <= pkt.length) {
+          const l = (pkt[p]<<24)|(pkt[p+1]<<16)|(pkt[p+2]<<8)|pkt[p+3]; p += 4;
+          if (l <= 0 || p + l > pkt.length) break;
+          out.push(sc, pkt.subarray(p, p + l)); p += l;
+        }
+        const res = new Uint8Array(out.reduce((a, b) => a + b.length, 0));
+        let o = 0; for (const b of out) { res.set(b, o); o += b.length; } return res;
+      }
+
+      function adts(raw, asc) {
+        const prof = asc ? ((asc>>3)-1) : 1, freq = asc ? (((asc&7)<<1)|(asc>>7)) : 3, ch = asc ? ((asc>>3)&15) : 2;
+        const len = raw.length + 7, h = new Uint8Array(len);
+        h=0xFF; h=0xF1; h=((prof&3)<<6)|((freq&15)<<2)|((ch>>2)&1);
+        h=((ch&3)<<6)|((len>>11)&3); h=(len>>3)&0xFF; h=((len&7)<<5)|0x1F; h=0xFC;
+        h.set(raw, 7); return h;
+      }
+
+      function playPcm(pcm) {
+        if (!pcm || pcm.byteLength < 16) return 0;
+        if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+        const n = Math.floor(pcm.byteLength / 8), f32 = new Float32Array(pcm.buffer, pcm.byteOffset, n * 2);
+        const buf = actx.createBuffer(2, n, 48000), L = buf.getChannelData(0), R = buf.getChannelData(1);
+        for (let i = 0; i < n; i++) { L[i] = f32[i*2]; R[i] = f32[i*2+1]; }
+        const s = actx.createBufferSource(); s.buffer = buf; s.connect(actx.destination);
+        const t = Math.max(actx.currentTime + 0.05, nextT); s.start(t); nextT = t + buf.duration;
+        return buf.duration;
+      }
+
+      fileIn.onchange = async (e) => {
+        const file = e.target.files && e.target.files.item(0);
+        if (!file || !ff) return;
+        const id = ++runId; play = true; msg.textContent = "Opening MKV...";
+
+        const demuxer = new WebDemuxer({ wasmFilePath: "${WASM}" });
+        await demuxer.load(file);
+        const info = await demuxer.getMediaInfo();
+        const vCfg = await demuxer.getDecoderConfig("video").catch(() => null);
+        const aCfg = await demuxer.getDecoderConfig("audio").catch(() => null);
+        const vPriv = vCfg && vCfg.description ? new Uint8Array(vCfg.description) : null;
+        const aPriv = aCfg && aCfg.description ? new Uint8Array(aCfg.description) : null;
+
+        const W = 512, H = 288, durTotal = info.duration || 1400;
+        cv.width = W; cv.height = H;
+        const img = ctx.createImageData(W, H), fBytes = W * H * 4;
+        if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+        nextT = actx.currentTime;
+
+        let tCur = 0, drawn = 0;
+        while (id === runId && tCur < durTotal) {
+          if (!play) { await new Promise(r => setTimeout(r, 50)); continue; }
+          const tEnd = Math.min(durTotal, tCur + 3);
+          const vPkts = await collectPackets(demuxer.readMediaPacket("video", tCur, tEnd));
+          const aPkts = aCfg ? await collectPackets(demuxer.readMediaPacket("audio", tCur, tEnd)) : [];
+          if (!vPkts.length) { tCur = tEnd; continue; }
+
+          const vChunks = vPkts.map((p, k) => annexB(k === 0 ? vPriv : null, new Uint8Array(p.data)));
+          const vBuf = new Uint8Array(vChunks.reduce((a, b) => a + b.length, 0));
+          let o = 0; for (const c of vChunks) { vBuf.set(c, o); o += c.length; }
+
+          const aChunks = aPkts.map(p => adts(new Uint8Array(p.data), aPriv));
+          const aBuf = new Uint8Array(aChunks.reduce((a, b) => a + b.length, 0));
+          o = 0; for (const c of aChunks) { aBuf.set(c, o); o += c.length; }
+
+          ff.FS("writeFile", "v.h264", vBuf);
+          const args = ["-r", "23.976", "-f", "h264", "-i", "v.h264"];
+          if (aBuf.length) { ff.FS("writeFile", "a.aac", aBuf); args.push("-f", "aac", "-i", "a.aac"); }
+          args.push("-map", "0:v:0", "-vf", "scale=" + W + ":" + H, "-f", "rawvideo", "-pix_fmt", "rgba", "out.rgba");
+          if (aBuf.length) args.push("-map", "1:a:0", "-ac", "2", "-ar", "48000", "-f", "f32le", "out.pcm");
+
+          try { await ff.run(...args); } catch (_) {}
+          try { ff.FS("unlink", "v.h264"); ff.FS("unlink", "a.aac"); } catch (_) {}
+
+          let raw = null, pcm = null;
+          try { raw = ff.FS("readFile", "out.rgba"); ff.FS("unlink", "out.rgba"); } catch (_) {}
+          try { pcm = ff.FS("readFile", "out.pcm"); ff.FS("unlink", "out.pcm"); } catch (_) {}
+
+          const total = raw ? Math.floor(raw.length / fBytes) : 0;
+          if (total > 0 && id === runId) {
+            const dur = playPcm(pcm);
+            const delay = dur > 0 ? Math.max(15, (dur * 1000) / total) : 41.7;
+            for (let i = 0; i < total && id === runId; i++) {
+              while (!play && id === runId) await new Promise(r => setTimeout(r, 50));
+              img.data.set(raw.subarray(i * fBytes, (i + 1) * fBytes));
+              ctx.putImageData(img, 0, 0); drawn++;
+              if (drawn % 5 === 1) msg.textContent = "Playing " + tCur.toFixed(0) + "s / " + durTotal.toFixed(0) + "s";
+              await new Promise(r => setTimeout(r, delay));
+            }
+          }
+          tCur = tEnd;
+        }
+        if (id === runId) msg.textContent = "Finished (" + drawn + " frames)";
+      };
+    <\/script></body></html>`;
+
+    const doc = frame.contentDocument || frame.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+  ]]></script>
+</svg>
