@@ -1,0 +1,208 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <iframe xmlns="http://www.w3.org/1999/xhtml" id="linux_frame" style="width:100vw;height:100vh;border:none;margin:0;padding:0;background:#000;"></iframe>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const CDN = "https:/" + "/cdn.jsdelivr.net/npm/h264decoder@1.0.0/dist/h264.wasm.min.js";
+    const frame = document.getElementById("linux_frame");
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+    <style>
+      body,html{margin:0;padding:0;background:#000;color:#eee;font-family:monospace;height:100%;display:flex;flex-direction:column;overflow:hidden}
+      #bar{padding:8px;background:#1a1a1a;display:flex;gap:8px;align-items:center;border-bottom:1px solid #333;font-size:12px}
+      #cv{flex:1;width:100%;height:100%;object-fit:contain;background:#000}
+      #msg{margin-left:auto;color:#7f7}
+    </style>
+    <script>
+      window.exports = {};
+      window.module = { exports: window.exports };
+    <\/script>
+    <script src="${CDN}"><\/script>
+    </head><body>
+    <div id="bar">
+      <input type="file" id="f" accept=".mkv,.webm" />
+      <button id="btn">Pause</button>
+      <span id="msg">TinyH264 SW Ready (Select .mkv)</span>
+    </div>
+    <canvas id="cv"></canvas>
+    <script>
+      const H264Decoder = window.H264Decoder || window.module.exports.H264Decoder || window.exports.H264Decoder;
+      const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+      const msg = document.getElementById("msg"), fileIn = document.getElementById("f");
+      let play = true, timer = null, imgData = null;
+
+      if (!H264Decoder) msg.textContent = "ERR: H264Decoder missing from bundle";
+
+      document.getElementById("btn").onclick = () => {
+        play = !play;
+        document.getElementById("btn").textContent = play ? "Pause" : "Play";
+      };
+
+      const uInt = (u, p, l) => { let v = 0; for (let i = 0; i < l; i++) v = v * 256 + u[p + i]; return v; };
+      function vint(u, p) {
+        let b = u[p], l = 1, m = 0x80;
+        while (l <= 8 && !(b & m)) { m >>= 1; l++; }
+        let v = b & (m - 1), ones = v === (m - 1);
+        for (let i = 1; i < l; i++) { v = v * 256 + u[p + i]; if (u[p + i] !== 0xFF) ones = false; }
+        return { v: ones ? -1 : v, l };
+      }
+      function eid(u, p) {
+        let b = u[p], l = 1, m = 0x80;
+        while (l <= 4 && !(b & m)) { m >>= 1; l++; }
+        return { id: uInt(u, p, l), l };
+      }
+      function unlace(u, start, end, laceType) {
+        if (!laceType) return [u.subarray(start, end)];
+        const count = u[start++] + 1, sizes = [];
+        if (laceType === 2) {
+          const sz = Math.floor((end - start) / count);
+          for (let i = 0; i < count; i++) sizes.push(sz);
+        } else if (laceType === 1) {
+          for (let i = 0; i < count - 1; i++) {
+            let s = 0, b; do { b = u[start++]; s += b; } while (b === 255); sizes.push(s);
+          }
+          sizes.push(end - start - sizes.reduce((a, b) => a + b, 0));
+        } else {
+          let first = vint(u, start); start += first.l; sizes.push(first.v);
+          let prev = first.v;
+          for (let i = 1; i < count - 1; i++) {
+            let d = vint(u, start); start += d.l;
+            prev += d.v - (Math.pow(2, 7 * d.l - 1) - 1);
+            sizes.push(prev);
+          }
+          sizes.push(end - start - sizes.reduce((a, b) => a + b, 0));
+        }
+        const out = [];
+        for (const s of sizes) { if (s > 0 && start + s <= end) out.push(u.subarray(start, start + s)); start += s; }
+        return out;
+      }
+      function extractSpsPps(avcC) {
+        const nals = [];
+        if (!avcC || avcC.length < 7) return { nals, nalLenSize: 4 };
+        const nalLenSize = (avcC & 3) + 1;
+        let p = 5, numSps = avcC[p++] & 0x1F;
+        for (let i = 0; i < numSps; i++) {
+          const len = (avcC[p] << 8) | avcC[p + 1]; p += 2;
+          const nal = new Uint8Array(4 + len); nal = 1; nal.set(avcC.subarray(p, p + len), 4);
+          nals.push(nal); p += len;
+        }
+        const numPps = avcC[p++];
+        for (let i = 0; i < numPps; i++) {
+          const len = (avcC[p] << 8) | avcC[p + 1]; p += 2;
+          const nal = new Uint8Array(4 + len); nal = 1; nal.set(avcC.subarray(p, p + len), 4);
+          nals.push(nal); p += len;
+        }
+        return { nals, nalLenSize };
+      }
+      function avccToAnnexB(pkt, nalLenSize) {
+        const out = []; let p = 0;
+        while (p + nalLenSize <= pkt.length) {
+          const len = uInt(pkt, p, nalLenSize); p += nalLenSize;
+          if (len <= 0 || p + len > pkt.length) break;
+          const nal = new Uint8Array(4 + len); nal = 1; nal.set(pkt.subarray(p, p + len), 4);
+          out.push(nal); p += len;
+        }
+        return out;
+      }
+      function renderYuv420(yuv, w, h) {
+        if (!imgData || cv.width !== w || cv.height !== h) {
+          cv.width = w; cv.height = h;
+          imgData = ctx.createImageData(w, h);
+        }
+        const rgba = imgData.data, ySize = w * h, uOff = ySize, vOff = ySize + (ySize >> 2), halfW = w >> 1;
+        for (let j = 0; j < h; j++) {
+          const yRow = j * w, uvRow = (j >> 1) * halfW;
+          for (let i = 0; i < w; i++) {
+            const Y = yuv[yRow + i] - 16;
+            const U = yuv[uOff + uvRow + (i >> 1)] - 128;
+            const V = yuv[vOff + uvRow + (i >> 1)] - 128;
+            const c = 298 * Y, p = (yRow + i) << 2;
+            rgba[p]     = (c + 409 * V + 128) >> 8;
+            rgba[p + 1] = (c - 100 * U - 208 * V + 128) >> 8;
+            rgba[p + 2] = (c + 516 * U + 128) >> 8;
+            rgba[p + 3] = 255;
+          }
+        }
+        ctx.putImageData(imgData, 0, 0);
+      }
+
+      fileIn.onchange = async (e) => {
+        const file = e.target.files && e.target.files;
+        if (!file || !H264Decoder) return;
+        clearInterval(timer);
+        msg.textContent = "Parsing MKV (" + (file.size / 1048576).toFixed(1) + " MB)...";
+        const u = new Uint8Array(await file.arrayBuffer());
+        let p = 0, vTrk = 1, cPriv = null, frames = [];
+
+        while (p < u.length - 4) {
+          const el = eid(u, p);
+          if (el.id === 0x1A45DFA3 || el.id === 0x18538067 || el.id === 0x1654AE6B || el.id === 0x1F43B675) {
+            p += el.l; const sz = vint(u, p); p += sz.l;
+            if (el.id === 0x18538067) continue;
+            const end = sz.v < 0 ? u.length : Math.min(u.length, p + sz.v);
+            if (el.id === 0x1654AE6B) {
+              let tp = p;
+              while (tp < end) {
+                const te = eid(u, tp); tp += te.l; const ts = vint(u, tp); tp += ts.l;
+                if (te.id === 0xAE) {
+                  let ep = tp, eEnd = tp + ts.v, num = 0, typ = 0, priv = null;
+                  while (ep < eEnd) {
+                    const sub = eid(u, ep); ep += sub.l; const ssz = vint(u, ep); ep += ssz.l;
+                    if (sub.id === 0xD7) num = uInt(u, ep, ssz.v);
+                    else if (sub.id === 0x83) typ = uInt(u, ep, ssz.v);
+                    else if (sub.id === 0x63A2) priv = u.slice(ep, ep + ssz.v);
+                    ep += ssz.v;
+                  }
+                  if (typ === 1) { vTrk = num; cPriv = priv; }
+                }
+                tp += ts.v;
+              }
+              p = end;
+            } else if (el.id === 0x1F43B675) {
+              let cp = p;
+              while (cp < end - 2) {
+                const ce = eid(u, cp); if (ce.id === 0x1F43B675) break;
+                cp += ce.l; const cs = vint(u, cp); cp += cs.l;
+                if (cs.v < 0 || cp + cs.v > u.length) break;
+                if (ce.id === 0xA3) {
+                  const tr = vint(u, cp), flg = u[cp + tr.l + 2];
+                  if (tr.v === vTrk) {
+                    const slices = unlace(u, cp + tr.l + 3, cp + cs.v, (flg >> 1) & 3);
+                    slices.forEach((d, k) => frames.push({ key: k === 0 && !!(flg & 0x80), data: d }));
+                  }
+                }
+                cp += cs.v;
+              }
+              p = cp;
+            } else p = end;
+          } else p++;
+        }
+
+        const dec = new H264Decoder();
+        const { nals, nalLenSize } = extractSpsPps(cPriv);
+        nals.forEach(n => dec.decode(n));
+
+        let idx = Math.max(0, frames.findIndex(x => x.key)), drawn = 0;
+        msg.textContent = "Loaded " + frames.length + " frames | Decoding...";
+
+        timer = setInterval(() => {
+          if (!play || idx >= frames.length) return;
+          const pktNals = avccToAnnexB(frames[idx++].data, nalLenSize);
+          for (const n of pktNals) {
+            const st = dec.decode(n);
+            if (st === H264Decoder.PIC_RDY) {
+              renderYuv420(dec.pic, dec.width, dec.height);
+              drawn++;
+              if (drawn % 5 === 1) msg.textContent = "SW Playing: " + drawn + "/" + frames.length + " (" + dec.width + "x" + dec.height + ")";
+            } else if (st >= H264Decoder.ERROR && drawn === 0) {
+              msg.textContent = "H264 SW Code: " + st + " (Baseline-only stream required)";
+            }
+          }
+        }, 41);
+      };
+    <\/script></body></html>`;
+
+    const doc = frame.contentDocument || frame.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+  ]]></script>
+</svg>
