@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100vw" height="100vh" style="margin:0;padding:0;background:#000;display:block;">
+  <foreignObject x="0" y="0" width="100%" height="100%">
+    <body xmlns="http://www.w3.org/1999/xhtml" style="margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;background:#000;">
+      <iframe id="q3_frame" style="width:100vw;height:100vh;border:none;display:block;background:#000;"></iframe>
+    </body>
+  </foreignObject>
+  <script type="application/ecmascript"><![CDATA[
+    const ENGINE_BASE = "https:/" + "/cdn.jsdelivr.net/gh/lrusso/Quake3@master/";
+    const DATA_BASE   = "https:/" + "/cdn.jsdelivr.net/gh/care24important7-cpu/my-linux@main/";
+
+    const storageShim = `<base href="${ENGINE_BASE}" />
+    <style>
+      body, html { margin: 0 !important; padding: 0 !important; background: #000 !important; overflow: hidden !important; }
+      #png_loader_banner {
+        position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,0.85); color: #0f0; font: 14px monospace;
+        padding: 8px 16px; border: 1px solid #0f0; z-index: 999999; pointer-events: none;
+      }
+    </style>
+    <script>
+      try { window.localStorage.getItem("t"); } catch (e) {
+        const mem = {};
+        Object.defineProperty(window, "localStorage", { value: {
+          getItem: k => mem[k] || null,
+          setItem: (k, v) => { mem[k] = String(v); },
+          removeItem: k => { delete mem[k]; },
+          clear: () => { for (const k in mem) delete mem[k]; }
+        }});
+      }
+      try { document.cookie; } catch (e) {
+        let c = "";
+        Object.defineProperty(document, "cookie", { get: () => c, set: v => { c = v; } });
+      }
+      try {
+        Object.defineProperty(navigator, "serviceWorker", {
+          value: { register: () => Promise.resolve({ scope: "./" }) }
+        });
+      } catch (e) {}
+
+      // Hold our reconstructed DEMO.pk3 DataTransfer once decoded
+      window.__DEMO_DT__ = null;
+
+      // Intercept dynamic <input type="file">.click() calls from Quake3.htm
+      const origInputClick = HTMLInputElement.prototype.click;
+      HTMLInputElement.prototype.click = function() {
+        if (this.type === "file" && window.__DEMO_DT__) {
+          this.files = window.__DEMO_DT__.files;
+          if (typeof this.onchange === "function") {
+            this.onchange({ target: this });
+          }
+          this.dispatchEvent(new Event("change", { bubbles: true }));
+          return;
+        }
+        return origInputClick.apply(this, arguments);
+      };
+
+      async function decodePngFromUrl(url) {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Failed to fetch " + url);
+        const buf = new Uint8Array(await res.arrayBuffer());
+        const view = new DataView(buf.buffer);
+        let offset = 8, width = 0, height = 0;
+        const idatChunks = [];
+
+        while (offset < buf.length) {
+          const len = view.getUint32(offset);
+          const type = String.fromCharCode(...buf.subarray(offset + 4, offset + 8));
+          const data = buf.subarray(offset + 8, offset + 8 + len);
+          if (type === "IHDR") {
+            width = view.getUint32(offset + 8);
+            height = view.getUint32(offset + 12);
+          } else if (type === "IDAT") {
+            idatChunks.push(data);
+          }
+          offset += 12 + len;
+        }
+
+        const totalIdat = idatChunks.reduce((sum, c) => sum + c.length, 0);
+        const compressed = new Uint8Array(totalIdat);
+        let pos = 0;
+        for (const c of idatChunks) { compressed.set(c, pos); pos += c.length; }
+
+        const ds = new DecompressionStream("deflate");
+        const writer = ds.writable.getWriter();
+        writer.write(compressed);
+        writer.close();
+        const scanlines = new Uint8Array(await new Response(ds.readable).arrayBuffer());
+
+        const rowBytes = width * 3;
+        const raw = new Uint8Array(height * rowBytes);
+        for (let y = 0; y < height; y++) {
+          raw.set(scanlines.subarray(y * (rowBytes + 1) + 1, (y + 1) * (rowBytes + 1)), y * rowBytes);
+        }
+
+        const exactLen = new DataView(raw.buffer).getUint32(0, true);
+        return raw.slice(4, 4 + exactLen);
+      }
+
+      window.addEventListener("DOMContentLoaded", async () => {
+        const banner = document.createElement("div");
+        banner.id = "png_loader_banner";
+        banner.textContent = "Fetching & decoding DEMO.pk3 from PNGs...";
+        document.body.appendChild(banner);
+
+        try {
+          const [part1, part2] = await Promise.all([
+            decodePngFromUrl("${DATA_BASE}demo_part1.png"),
+            decodePngFromUrl("${DATA_BASE}demo_part2.png")
+          ]);
+
+          const fullPk3 = new Uint8Array(part1.length + part2.length);
+          fullPk3.set(part1, 0);
+          fullPk3.set(part2, part1.length);
+
+          const file = new File([fullPk3], "DEMO.pk3", { type: "application/octet-stream" });
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          window.__DEMO_DT__ = dt;
+
+          banner.textContent = "DEMO.pk3 ready (" + (fullPk3.length / 1048576).toFixed(2) + " MB) - launching...";
+
+          // Wait for #container or an existing file input to appear, then trigger it
+          const bootTimer = setInterval(() => {
+            const existingInput = document.querySelector('input[type="file"]');
+            if (existingInput) {
+              clearInterval(bootTimer);
+              existingInput.click();
+              setTimeout(() => banner.remove(), 2000);
+              return;
+            }
+            const container = document.getElementById("container");
+            const target = container ? (container.querySelector("img, button, a, div") || container) : null;
+            if (target && getComputedStyle(container).display !== "none") {
+              clearInterval(bootTimer);
+              target.click();
+              setTimeout(() => banner.remove(), 2000);
+            }
+          }, 200);
+        } catch (err) {
+          banner.style.color = "#f55";
+          banner.style.borderColor = "#f55";
+          banner.textContent = "Error: " + err.message;
+        }
+      });
+    <\/script>`;
+
+    fetch(ENGINE_BASE + "Quake3.htm")
+      .then(res => res.text())
+      .then(html => {
+        const injected = /<head[^>]*>/i.test(html)
+          ? html.replace(/<head[^>]*>/i, match => match + storageShim)
+          : storageShim + html;
+        const frame = document.querySelector("iframe");
+        const doc = frame.contentDocument || frame.contentWindow.document;
+        doc.open();
+        doc.write(injected);
+        doc.close();
+      });
+  ]]></script>
+</svg>
