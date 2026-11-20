@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <h3>Zero-Library PNG Decoder for DEMO.pk3</h3>
+  <p>Select both <b>demo_part1.png</b> and <b>demo_part2.png</b> at once:</p>
+  <input type="file" id="picker" accept="image/png" multiple />
+  <p id="status"></p>
+
+  <script>
+    async function decodeRawPNGFromBuffer(arrayBuffer) {
+      const buf = new Uint8Array(arrayBuffer);
+      const view = new DataView(buf.buffer);
+      let offset = 8, width = 0, height = 0;
+      const idatChunks = [];
+
+      while (offset < buf.length) {
+        const len = view.getUint32(offset);
+        const type = String.fromCharCode(...buf.subarray(offset + 4, offset + 8));
+        const data = buf.subarray(offset + 8, offset + 8 + len);
+        if (type === 'IHDR') {
+          width = view.getUint32(offset + 8);
+          height = view.getUint32(offset + 12);
+        } else if (type === 'IDAT') {
+          idatChunks.push(data);
+        }
+        offset += 12 + len;
+      }
+
+      const totalIdat = idatChunks.reduce((sum, c) => sum + c.length, 0);
+      const compressed = new Uint8Array(totalIdat);
+      let pos = 0;
+      for (const c of idatChunks) { compressed.set(c, pos); pos += c.length; }
+
+      const ds = new DecompressionStream('deflate');
+      const writer = ds.writable.getWriter();
+      writer.write(compressed);
+      writer.close();
+      const scanlines = new Uint8Array(await new Response(ds.readable).arrayBuffer());
+
+      const rowBytes = width * 3;
+      const raw = new Uint8Array(height * rowBytes);
+      for (let y = 0; y < height; y++) {
+        raw.set(scanlines.subarray(y * (rowBytes + 1) + 1, (y + 1) * (rowBytes + 1)), y * rowBytes);
+      }
+
+      const exactLen = new DataView(raw.buffer).getUint32(0, true);
+      return raw.slice(4, 4 + exactLen);
+    }
+
+    document.getElementById('picker').onchange = async (e) => {
+      const files = Array.from(e.target.files).sort((a, b) => a.name.localeCompare(b.name));
+      if (files.length < 2) {
+        document.getElementById('status').textContent = 'Please select both demo_part1.png and demo_part2.png.';
+        return;
+      }
+
+      document.getElementById('status').textContent = 'Decoding...';
+      const part1 = await decodeRawPNGFromBuffer(await files.at(0).arrayBuffer());
+      const part2 = await decodeRawPNGFromBuffer(await files.at(1).arrayBuffer());
+
+      const fullPk3 = new Uint8Array(part1.length + part2.length);
+      fullPk3.set(part1, 0);
+      fullPk3.set(part2, part1.length);
+
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([fullPk3], { type: 'application/octet-stream' }));
+      a.download = 'DEMO_reconstructed.pk3';
+      a.click();
+
+      document.getElementById('status').textContent = `Done! Reconstructed ${fullPk3.length} bytes.`;
+    };
+  </script>
+</body>
+</html>
